@@ -1,113 +1,134 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, ListTodo, Bell, Send, LogOut, MessageSquare,
-  Menu, BarChart2, Users, Zap, Database, MessageCircle, Mail, Settings
+  Menu, BarChart2, Users, Zap, Database, MessageCircle, Mail,
+  Settings, Send as TelegramIcon, Globe, X
 } from 'lucide-react'
 import { useState } from 'react'
 import useAuthStore from '../../store/authStore'
-import clsx from 'clsx'
 
 const NAV = [
-  { section: 'Overview' },
+  { section: 'OVERVIEW' },
   { to: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/analytics',     icon: BarChart2,        label: 'Analytics' },
-  { section: 'Messaging' },
+  { section: 'MESSAGING' },
   { to: '/tasks',         icon: ListTodo,         label: 'Tasks' },
   { to: '/send-sms',      icon: Send,             label: 'Send SMS' },
   { to: '/whatsapp',      icon: MessageCircle,    label: 'WhatsApp' },
+  { to: '/telegram',      icon: TelegramIcon,     label: 'Telegram' },
   { to: '/email',         icon: Mail,             label: 'Email' },
   { to: '/notifications', icon: Bell,             label: 'History' },
-  { section: 'Integrations' },
+  { section: 'INTEGRATIONS' },
   { to: '/datasources',   icon: Database,         label: 'Data Sources' },
+  { to: '/scraper',       icon: Globe,            label: 'Web Monitor' },
   { to: '/webhooks',      icon: Zap,              label: 'Webhooks' },
-  { section: 'Team' },
+  { section: 'TEAM' },
   { to: '/organizations', icon: Users,            label: 'Organizations' },
   { to: '/settings',      icon: Settings,         label: 'Settings' },
 ]
 
-export default function Layout() {
+function SidebarContent({ onNavClick }) {
   const logout = useAuthStore((s) => s.logout)
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
-  const [open, setOpen] = useState(false)
 
   const handleLogout = () => { logout(); navigate('/login') }
 
-  const SidebarContent = () => (
-    <>
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-gray-700">
-        <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center">
-          <MessageSquare size={16} className="text-white" />
+  return (
+    <div className="flex flex-col h-full" style={{ background: 'var(--sidebar)' }}>
+      {/* Logo */}
+      <div className="flex items-center gap-2.5 px-5 py-4 border-b" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'var(--primary)' }}>
+          <MessageSquare size={15} className="text-white" />
         </div>
-        <span className="font-bold text-lg tracking-tight">Task2SMS</span>
+        <span className="font-semibold text-white text-base tracking-tight">Task2SMS</span>
       </div>
 
-      <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-0.5">
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto px-2 py-3 scrollbar-thin space-y-0.5">
         {NAV.map((item, i) => {
           if (item.section) return (
-            <p key={i} className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 pt-4 pb-1.5 first:pt-1">
-              {item.section}
-            </p>
+            <p key={i} className="section-label">{item.section}</p>
           )
           const { to, icon: Icon, label } = item
           return (
-            <NavLink key={to} to={to} onClick={() => setOpen(false)}
-              className={({ isActive }) => clsx(
-                'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-brand-600 text-white'
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-              )}>
-              <Icon size={17} /> {label}
+            <NavLink key={to} to={to} onClick={onNavClick}
+              className={({ isActive }) =>
+                `sidebar-nav-item${isActive ? ' active' : ''}`
+              }>
+              <Icon size={16} />
+              <span>{label}</span>
             </NavLink>
           )
         })}
       </nav>
 
-      <div className="px-3 py-4 border-t border-gray-700">
-        <div className="flex items-center gap-3 px-3 py-2 mb-1">
-          <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center text-xs font-bold text-white">
-            {user?.username?.[0]?.toUpperCase()}
+      {/* User footer */}
+      <div className="px-2 py-3 border-t" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+        <div className="flex items-center gap-3 px-3 py-2 mb-1 rounded-lg">
+          <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+            style={{ background: 'var(--primary)' }}>
+            {user?.username?.[0]?.toUpperCase() || 'U'}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate text-white">{user?.username}</p>
-            <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+            <p className="text-sm font-medium text-white truncate leading-tight">{user?.username}</p>
+            <p className="text-xs truncate leading-tight" style={{ color: 'var(--sidebar-muted)' }}>{user?.email}</p>
           </div>
         </div>
         <button onClick={handleLogout}
-          className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
-          <LogOut size={16} /> Sign out
+          className="sidebar-nav-item w-full text-left">
+          <LogOut size={15} />
+          <span>Sign out</span>
         </button>
       </div>
-    </>
+    </div>
   )
+}
+
+export default function Layout() {
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-slate-50">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex flex-col w-60 bg-gray-900 text-white shrink-0">
+      <aside className="hidden md:flex flex-col w-[220px] shrink-0">
         <SidebarContent />
       </aside>
 
       {/* Mobile drawer */}
-      {open && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
-          <aside className="relative z-50 flex flex-col w-60 h-full bg-gray-900 text-white">
-            <SidebarContent />
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setMobileOpen(false)} />
+          <aside className="relative z-50 flex flex-col w-[220px] h-full shadow-xl">
+            <div className="absolute top-3 right-3 z-10">
+              <button onClick={() => setMobileOpen(false)}
+                className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-white/20 transition-colors">
+                <X size={14} />
+              </button>
+            </div>
+            <SidebarContent onNavClick={() => setMobileOpen(false)} />
           </aside>
         </div>
       )}
 
+      {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200">
-          <button onClick={() => setOpen(true)} className="p-1 rounded text-gray-600">
-            <Menu size={22} />
+        {/* Mobile top bar */}
+        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-200">
+          <button onClick={() => setMobileOpen(true)}
+            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors">
+            <Menu size={20} />
           </button>
-          <span className="font-bold text-gray-900">Task2SMS</span>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--primary)' }}>
+              <MessageSquare size={13} className="text-white" />
+            </div>
+            <span className="font-semibold text-slate-900 text-sm">Task2SMS</span>
+          </div>
         </header>
 
-        <main className="flex-1 overflow-auto bg-gray-50 p-4 md:p-8">
+        <main className="flex-1 overflow-auto p-4 md:p-7 animate-fade-in">
           <Outlet />
         </main>
       </div>

@@ -4,8 +4,13 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.database import create_tables
 from app.workers.scheduler import start_scheduler, stop_scheduler
-from app.api import (auth, tasks, notifications, stats, settings as settings_api,
-                     organizations, webhooks, analytics, datasources, whatsapp, email_api)
+from app.api import (
+    auth, tasks, notifications, stats,
+    settings as settings_api, organizations,
+    webhooks, analytics, datasources,
+    whatsapp, email_api,
+)
+from app.api import telegram_api, monitors
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +46,7 @@ for router in [
     stats.router, settings_api.router, organizations.router,
     webhooks.router, analytics.router, datasources.router,
     whatsapp.router, email_api.router,
+    telegram_api.router, monitors.router,
 ]:
     app.include_router(router, prefix="/api")
 

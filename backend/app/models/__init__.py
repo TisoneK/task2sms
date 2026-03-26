@@ -6,6 +6,8 @@ from app.models.webhook import Webhook, WebhookDelivery, WebhookEvent, WebhookDe
 from app.models.datasource import DataSource, DataSourceType
 from app.models.email_notification import EmailNotification, EmailStatus
 from app.models.whatsapp import WhatsAppMessage, WhatsAppStatus
+from app.models.telegram import TelegramMessage, TelegramStatus
+from app.models.scraper import ScraperMonitor, ScraperCheckLog, SelectorType, MonitorStatus
 
 __all__ = [
     "User", "Task", "TaskStatus", "ScheduleType",
@@ -15,4 +17,6 @@ __all__ = [
     "DataSource", "DataSourceType",
     "EmailNotification", "EmailStatus",
     "WhatsAppMessage", "WhatsAppStatus",
+    "TelegramMessage", "TelegramStatus",
+    "ScraperMonitor", "ScraperCheckLog", "SelectorType", "MonitorStatus",
 ]

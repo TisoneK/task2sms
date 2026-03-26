@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     WHATSAPP_PROVIDER: str = "twilio"
     WHATSAPP_FROM: str = "whatsapp:+14155238886"
 
+    # Telegram
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_DEFAULT_PARSE_MODE: str = "HTML"
+
     # GSM Modem
     GSM_PORT: str = "/dev/ttyUSB0"
     GSM_BAUDRATE: int = 115200
@@ -45,7 +49,6 @@ class Settings(BaseSettings):
     # Webhooks
     WEBHOOK_SECRET: str = "change-me-webhook-secret"
 
-    # Roles
     DEFAULT_ROLE: str = "member"
 
     class Config:
