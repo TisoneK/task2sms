@@ -17,37 +17,43 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <div className="min-h-screen flex items-center justify-center px-4"
+         style={{ background: 'var(--background)' }}>
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-brand-600 flex items-center justify-center mx-auto mb-4">
-            <MessageSquare size={24} className="text-white" />
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4"
+               style={{ background: 'var(--primary)' }}>
+            <MessageSquare size={22} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Task2SMS</h1>
-          <p className="text-gray-500 text-sm mt-1">Sign in to your account</p>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--foreground)' }}>Task2SMS</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>Sign in to your account</p>
         </div>
 
         <div className="card p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="label">Username or Email</label>
-              <input className="input" type="text" required
+              <input className="input" type="text" required autoComplete="username"
                 value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} />
             </div>
             <div>
               <label className="label">Password</label>
-              <input className="input" type="password" required
+              <input className="input" type="password" required autoComplete="current-password"
                 value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
             </div>
-            <button type="submit" disabled={isLoading} className="btn-primary w-full justify-center">
-              {isLoading ? 'Signing in…' : 'Sign In'}
+            <button type="submit" disabled={isLoading} className="btn-primary w-full justify-center mt-2">
+              {isLoading
+                ? <><span className="spinner-sm" /> Signing in…</>
+                : 'Sign In'}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-sm text-gray-500 mt-4">
+        <p className="text-center text-sm mt-5" style={{ color: 'var(--muted-foreground)' }}>
           No account?{' '}
-          <Link to="/register" className="text-brand-600 font-medium hover:underline">Register</Link>
+          <Link to="/register" className="font-medium" style={{ color: 'var(--primary)' }}>
+            Create one
+          </Link>
         </p>
       </div>
     </div>

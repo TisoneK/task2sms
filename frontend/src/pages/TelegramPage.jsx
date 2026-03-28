@@ -97,11 +97,11 @@ export default function TelegramPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+      <div className="flex gap-1 bg-muted p-1 rounded-lg w-fit">
         {['send', 'history'].map(t => (
           <button key={t} onClick={() => handleTabChange(t)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium capitalize transition-colors ${
-              tab === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              tab === t ? 'bg-white text-foreground shadow-sm' : ' hover:text-foreground'
             }`}>{t}</button>
         ))}
       </div>
@@ -110,7 +110,7 @@ export default function TelegramPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Recipients */}
           <div className="card p-5 space-y-4">
-            <h2 className="font-semibold text-slate-900 text-sm">Chat IDs / Usernames</h2>
+            <h2 className="font-semibold text-foreground text-sm">Chat IDs / Usernames</h2>
             {chatIds.map((id, i) => (
               <div key={i} className="flex gap-2">
                 <input className="input flex-1 font-mono text-sm" value={id}
@@ -127,7 +127,7 @@ export default function TelegramPage() {
             <button type="button" onClick={addChatId} className="btn-secondary text-sm">
               <Plus size={14} /> Add recipient
             </button>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-muted">
               Use numeric chat IDs for users/groups. Use @username for public channels.
               Have the user send /start to your bot first.
             </p>
@@ -136,8 +136,8 @@ export default function TelegramPage() {
           {/* Message */}
           <div className="card p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-slate-900 text-sm">Message</h2>
-              <select className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              <h2 className="font-semibold text-foreground text-sm">Message</h2>
+              <select className="text-xs border border-card rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 value={parseMode} onChange={e => setParseMode(e.target.value)}>
                 <option value="HTML">HTML</option>
                 <option value="Markdown">Markdown</option>
@@ -152,10 +152,10 @@ export default function TelegramPage() {
                 : '*Bold*, _italic_, `code`'}
             />
             <div className="flex items-center justify-between">
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-muted">
                 {parseMode === 'HTML' ? 'Tags: <b> <i> <code> <pre> <a href="…">' : 'Use *bold* _italic_ `code` [link](url)'}
               </p>
-              <p className="text-xs text-slate-400">{message.length}/4096</p>
+              <p className="text-xs text-muted">{message.length}/4096</p>
             </div>
           </div>
 
@@ -171,18 +171,18 @@ export default function TelegramPage() {
               <div className="flex gap-6">
                 <div className="text-center">
                   <p className="text-2xl font-bold text-emerald-600">{results.sent}</p>
-                  <p className="text-xs text-slate-500">Sent</p>
+                  <p className="text-xs text-muted">Sent</p>
                 </div>
                 <div className="text-center">
                   <p className="text-2xl font-bold text-red-500">{results.failed}</p>
-                  <p className="text-xs text-slate-500">Failed</p>
+                  <p className="text-xs text-muted">Failed</p>
                 </div>
               </div>
               {results.results.map((r, i) => (
-                <div key={i} className="flex items-center justify-between text-sm py-1 border-b border-slate-50 last:border-0">
-                  <span className="font-mono text-slate-700">{r.chat_id}</span>
+                <div key={i} style={{ color: "var(--muted-foreground)" }}>
+                  <span className="font-mono text-foreground">{r.chat_id}</span>
                   <div className="flex items-center gap-2">
-                    {r.message_id && <span className="text-xs text-slate-400">#{r.message_id}</span>}
+                    {r.message_id && <span className="text-xs text-muted">#{r.message_id}</span>}
                     <span className={STATUS_COLORS[r.status?.value || r.status] || 'badge-gray'}>
                       {r.status?.value || r.status}
                     </span>
@@ -201,26 +201,26 @@ export default function TelegramPage() {
               <div className="w-8 h-8 spinner" />
             </div>
           ) : history.length === 0 ? (
-            <div className="card p-12 text-center text-slate-400 text-sm">No messages sent yet.</div>
+            <div className="card p-12 text-center text-muted text-sm">No messages sent yet.</div>
           ) : (
             <>
               <div className="card divide-y divide-slate-50">
                 {history.map(m => (
-                  <div key={m.id} className="flex items-start gap-4 px-5 py-4 hover:bg-slate-50 transition-colors">
+                  <div key={m.id} className="flex items-start gap-4 px-5 py-4 hover:bg-muted transition-colors">
                     <div className="w-8 h-8 rounded-full flex items-center justify-center text-white shrink-0 mt-0.5"
                       style={{ background: TELEGRAM_BLUE }}>
                       <TelegramIcon size={14} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-900 font-mono">{m.chat_id}</p>
-                      <p className="text-sm text-slate-600 mt-0.5 break-words">{m.message}</p>
+                      <p className="text-sm font-medium text-foreground font-mono">{m.chat_id}</p>
+                      <p className="text-sm text-muted mt-0.5 break-words">{m.message}</p>
                       {m.error_message && (
                         <p className="text-xs text-red-500 mt-1 bg-red-50 rounded px-2 py-1">{m.error_message}</p>
                       )}
                     </div>
                     <div className="text-right shrink-0">
                       <span className={STATUS_COLORS[m.status] || 'badge-gray'}>{m.status}</span>
-                      <p className="text-xs text-slate-400 mt-1">
+                      <p className="text-xs text-muted mt-1">
                         {formatDistanceToNow(new Date(m.sent_at || m.created_at), { addSuffix: true })}
                       </p>
                     </div>

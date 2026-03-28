@@ -10,17 +10,22 @@ const OPERATORS = [
   { value: 'lt', label: '<' }, { value: 'lte', label: '<=' },
   { value: 'eq', label: '==' }, { value: 'neq', label: '!=' },
 ]
-
 const DEFAULT_FORM = {
   name: '', description: '',
   schedule_type: 'interval',
-  cron_expression: '', interval_value: 1, interval_unit: 'hours',
-  run_at: '',
+  cron_expression: '', interval_value: 1, interval_unit: 'hours', run_at: '',
   condition_enabled: false,
   condition_field: '', condition_operator: 'gt', condition_value: '',
-  recipients: [''],
-  message_template: '',
-  sms_provider: '',
+  recipients: [''], message_template: '', sms_provider: '',
+}
+
+function Section({ title, children }) {
+  return (
+    <div className="card p-5 space-y-4">
+      <h2 className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{title}</h2>
+      {children}
+    </div>
+  )
 }
 
 export default function TaskFormPage() {
@@ -34,29 +39,22 @@ export default function TaskFormPage() {
   useEffect(() => {
     if (!isEdit) return
     tasksApi.get(id)
-      .then(({ data }) => {
-        setForm({
-          ...DEFAULT_FORM, ...data,
-          cron_expression: data.cron_expression || '',
-          run_at: data.run_at ? data.run_at.slice(0, 16) : '',
-          sms_provider: data.sms_provider || '',
-          recipients: data.recipients.length ? data.recipients : [''],
-        })
-      })
+      .then(({ data }) => setForm({
+        ...DEFAULT_FORM, ...data,
+        cron_expression: data.cron_expression || '',
+        run_at: data.run_at ? data.run_at.slice(0, 16) : '',
+        sms_provider: data.sms_provider || '',
+        recipients: data.recipients?.length ? data.recipients : [''],
+      }))
       .catch(() => { toast.error('Failed to load task'); navigate('/tasks') })
       .finally(() => setFetching(false))
   }, [id])
 
-  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
-  const setCheck = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.checked }))
-
-  const setRecipient = (i, v) => setForm(f => {
-    const r = [...f.recipients]; r[i] = v; return { ...f, recipients: r }
-  })
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
+  const setCheck = k => e => setForm(f => ({ ...f, [k]: e.target.checked }))
+  const setRecipient = (i, v) => setForm(f => { const r = [...f.recipients]; r[i] = v; return { ...f, recipients: r } })
   const addRecipient = () => setForm(f => ({ ...f, recipients: [...f.recipients, ''] }))
-  const removeRecipient = (i) => setForm(f => ({
-    ...f, recipients: f.recipients.filter((_, idx) => idx !== i)
-  }))
+  const removeRecipient = i => setForm(f => ({ ...f, recipients: f.recipients.filter((_, idx) => idx !== i) }))
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -80,54 +78,52 @@ export default function TaskFormPage() {
   }
 
   if (fetching) return (
-    <div className="flex justify-center py-20">
-      <div className="w-8 h-8 border-4 border-brand-500 border-t-transparent rounded-full animate-spin" />
-    </div>
+    <div className="flex justify-center py-20"><div className="spinner-lg" /></div>
   )
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-2xl mx-auto space-y-5 animate-fade-in">
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/tasks')} className="btn-ghost p-2">
-          <ChevronLeft size={20} />
+          <ChevronLeft size={18} />
         </button>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{isEdit ? 'Edit Task' : 'New Task'}</h1>
-          <p className="text-sm text-gray-500">Configure automated SMS task</p>
+          <h1 className="page-title">{isEdit ? 'Edit Task' : 'New Task'}</h1>
+          <p className="page-subtitle">Configure automated SMS task</p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Basic Info */}
-        <div className="card p-5 space-y-4">
-          <h2 className="font-semibold text-gray-900">Basic Info</h2>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Basic info */}
+        <Section title="Basic Info">
           <div>
             <label className="label">Task Name *</label>
-            <input className="input" required value={form.name} onChange={set('name')} placeholder="e.g. Daily Attendance Alert" />
+            <input className="input" required value={form.name} onChange={set('name')}
+              placeholder="e.g. Daily Attendance Alert" />
           </div>
           <div>
             <label className="label">Description</label>
-            <textarea className="input resize-none" rows={2} value={form.description} onChange={set('description')} placeholder="Optional description" />
+            <textarea className="input resize-none" rows={2} value={form.description}
+              onChange={set('description')} placeholder="Optional description" />
           </div>
-        </div>
+        </Section>
 
         {/* Schedule */}
-        <div className="card p-5 space-y-4">
-          <h2 className="font-semibold text-gray-900">Schedule</h2>
+        <Section title="Schedule">
           <div>
             <label className="label">Schedule Type</label>
             <select className="input" value={form.schedule_type} onChange={set('schedule_type')}>
-              <option value="interval">Interval (every X minutes/hours/days)</option>
+              <option value="interval">Interval (every X min/hours/days)</option>
               <option value="cron">Cron Expression</option>
               <option value="one_time">One-time</option>
             </select>
           </div>
-
           {form.schedule_type === 'interval' && (
             <div className="flex gap-3">
               <div className="flex-1">
                 <label className="label">Every</label>
-                <input className="input" type="number" min={1} value={form.interval_value} onChange={set('interval_value')} />
+                <input className="input" type="number" min={1} value={form.interval_value}
+                  onChange={set('interval_value')} />
               </div>
               <div className="flex-1">
                 <label className="label">Unit</label>
@@ -139,99 +135,96 @@ export default function TaskFormPage() {
               </div>
             </div>
           )}
-
           {form.schedule_type === 'cron' && (
             <div>
               <label className="label">Cron Expression</label>
               <input className="input font-mono" value={form.cron_expression} onChange={set('cron_expression')}
-                placeholder="0 9 * * 1-5  (weekdays at 9am)" />
-              <p className="text-xs text-gray-400 mt-1">Format: minute hour day month weekday</p>
+                placeholder="0 9 * * 1-5" />
+              <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                Format: minute hour day month weekday
+              </p>
             </div>
           )}
-
           {form.schedule_type === 'one_time' && (
             <div>
               <label className="label">Run At</label>
               <input className="input" type="datetime-local" value={form.run_at} onChange={set('run_at')} />
             </div>
           )}
-        </div>
+        </Section>
 
         {/* Condition */}
-        <div className="card p-5 space-y-4">
+        <Section title="Conditional Send">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900">Conditional Send</h2>
+            <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+              Only send when a condition is met
+            </p>
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={form.condition_enabled} onChange={setCheck('condition_enabled')}
-                className="w-4 h-4 accent-brand-600" />
-              <span className="text-sm text-gray-600">Enable</span>
+                className="w-4 h-4 rounded accent-sky-600" />
+              <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>Enable</span>
             </label>
           </div>
           {form.condition_enabled && (
-            <div className="flex gap-2 flex-wrap">
-              <div className="flex-1 min-w-28">
+            <div className="flex gap-2 flex-wrap pt-1">
+              <div className="flex-1 min-w-24">
                 <label className="label">Field</label>
-                <input className="input" value={form.condition_field} onChange={set('condition_field')} placeholder="e.g. total" />
+                <input className="input" value={form.condition_field} onChange={set('condition_field')}
+                  placeholder="e.g. total" />
               </div>
               <div className="w-24">
-                <label className="label">Operator</label>
+                <label className="label">Op</label>
                 <select className="input" value={form.condition_operator} onChange={set('condition_operator')}>
                   {OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>
-              <div className="flex-1 min-w-28">
+              <div className="flex-1 min-w-24">
                 <label className="label">Value</label>
-                <input className="input" value={form.condition_value} onChange={set('condition_value')} placeholder="e.g. 140" />
+                <input className="input" value={form.condition_value} onChange={set('condition_value')}
+                  placeholder="e.g. 140" />
               </div>
             </div>
           )}
-          {form.condition_enabled && (
-            <p className="text-xs text-gray-400 bg-gray-50 rounded px-3 py-2">
-              SMS will only send when the condition is met. Pass context values when running via API.
-            </p>
-          )}
-        </div>
+        </Section>
 
         {/* Recipients */}
-        <div className="card p-5 space-y-4">
-          <h2 className="font-semibold text-gray-900">Recipients</h2>
+        <Section title="Recipients">
           {form.recipients.map((r, i) => (
             <div key={i} className="flex gap-2">
               <input className="input flex-1" value={r} onChange={e => setRecipient(i, e.target.value)}
                 placeholder="+254712345678" type="tel" />
               {form.recipients.length > 1 && (
                 <button type="button" onClick={() => removeRecipient(i)}
-                  className="btn-ghost p-2 text-red-400 hover:text-red-600 hover:bg-red-50">
-                  <X size={16} />
+                  className="btn-ghost p-2" style={{ color: 'var(--destructive)' }}>
+                  <X size={15} />
                 </button>
               )}
             </div>
           ))}
           <button type="button" onClick={addRecipient} className="btn-secondary text-sm">
-            <Plus size={15} /> Add recipient
+            <Plus size={14} /> Add recipient
           </button>
-        </div>
+        </Section>
 
         {/* Message */}
-        <div className="card p-5 space-y-4">
-          <h2 className="font-semibold text-gray-900">Message</h2>
+        <Section title="Message">
           <div>
             <label className="label">Message Template *</label>
             <textarea className="input resize-none font-mono text-sm" rows={4} required
               value={form.message_template} onChange={set('message_template')}
               placeholder="Hello {name}, your score is {total}." />
-            <p className="text-xs text-gray-400 mt-1">
-              Use {'{field}'} placeholders. They'll be replaced when context is provided.
+            <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+              Use {'{'}<code>field</code>{'}'} placeholders — filled from context at runtime.
             </p>
           </div>
           <div>
-            <label className="label">SMS Provider (optional — overrides default)</label>
+            <label className="label">SMS Provider (optional)</label>
             <select className="input" value={form.sms_provider} onChange={set('sms_provider')}>
               <option value="">Use default</option>
               {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
-        </div>
+        </Section>
 
         <div className="flex gap-3 justify-end">
           <button type="button" onClick={() => navigate('/tasks')} className="btn-secondary">Cancel</button>

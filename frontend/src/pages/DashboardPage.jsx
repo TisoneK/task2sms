@@ -154,7 +154,7 @@ export default function DashboardPage() {
                     </p>
                   </div>
                   <span className={task.status === 'active' ? 'badge-green' : task.status === 'paused' ? 'badge-yellow' : task.status === 'failed' ? 'badge-red' : 'badge-gray'}>{task.status}</span>
-                  <button onClick={() => runTask(task.id)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" style={{ color: 'var(--muted-foreground)' }} title="Run now"><Play size={14} /></button>
+                  <button onClick={() => runTask(task.id)} className="p-1.5 rounded-lg hover:bg-muted dark:hover:bg-foreground transition-colors" style={{ color: 'var(--muted-foreground)' }} title="Run now"><Play size={14} /></button>
                 </div>
               ))}
           </div>

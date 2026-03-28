@@ -77,7 +77,7 @@ export default function SettingsPage() {
         <form onSubmit={handleProfile} className="space-y-4">
           <div>
             <label className="label">Username</label>
-            <input className="input bg-gray-50 cursor-not-allowed" value={user?.username || ''} disabled />
+            <input className="input bg-muted cursor-not-allowed" value={user?.username || ''} disabled />
             <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>Username cannot be changed</p>
           </div>
           <div>

@@ -4,13 +4,12 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.database import create_tables
 from app.workers.scheduler import start_scheduler, stop_scheduler
-from app.api import (
+from app.api.routes import (
     auth, tasks, notifications, stats,
-    settings as settings_api, organizations,
+    settings as settings_router, organizations,
     webhooks, analytics, datasources,
-    whatsapp, email_api,
+    whatsapp, email_api, telegram_api, monitors,
 )
-from app.api import telegram_api, monitors
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +30,8 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 app.add_middleware(
@@ -41,13 +42,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for router in [
+ROUTERS = [
     auth.router, tasks.router, notifications.router,
-    stats.router, settings_api.router, organizations.router,
+    stats.router, settings_router.router, organizations.router,
     webhooks.router, analytics.router, datasources.router,
     whatsapp.router, email_api.router,
     telegram_api.router, monitors.router,
-]:
+]
+
+for router in ROUTERS:
     app.include_router(router, prefix="/api")
 
 

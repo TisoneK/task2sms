@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, JSON, Enum, Float, func
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, JSON, Enum, func
 import enum
 from app.core.database import Base
 
@@ -6,8 +6,8 @@ from app.core.database import Base
 class SelectorType(str, enum.Enum):
     CSS = "css"
     XPATH = "xpath"
-    TEXT = "text"        # page full text search
-    REGEX = "regex"      # regex on page HTML
+    TEXT = "text"
+    REGEX = "regex"
 
 
 class MonitorStatus(str, enum.Enum):
@@ -24,19 +24,25 @@ class ScraperMonitor(Base):
     name = Column(String(200), nullable=False)
     url = Column(String(1000), nullable=False)
 
-    # What to extract
+    # Extraction
     selector_type = Column(Enum(SelectorType), default=SelectorType.CSS)
-    selector = Column(Text, nullable=False)          # e.g.  "div.price" or "//span[@class='price']"
-    attribute = Column(String(100), nullable=True)   # e.g.  "text", "href", "src" — None = innerText
+    selector = Column(Text, nullable=False)
+    attribute = Column(String(100), nullable=True)
 
-    # Condition to trigger alert
-    condition_operator = Column(String(20), nullable=True)  # gt, lt, eq, neq, contains, changed
+    # Dynamic rendering (Playwright)
+    use_playwright = Column(Boolean, default=False)
+    wait_selector = Column(String(300), nullable=True)   # wait for this CSS selector before extracting
+    wait_ms = Column(Integer, default=2000)              # fallback wait in ms
+
+    # Condition
+    condition_operator = Column(String(20), nullable=True)
     condition_value = Column(String(500), nullable=True)
 
-    # Notification channels (list of: sms|email|whatsapp|telegram)
+    # Notifications
     notify_channels = Column(JSON, default=list)
-    notify_recipients = Column(JSON, default=list)   # phone/email/chat_id per channel
-    message_template = Column(Text, nullable=False, default="Monitor alert: {name} — value changed to {value}")
+    notify_recipients = Column(JSON, default=list)
+    message_template = Column(Text, nullable=False,
+                               default="Monitor alert: {name} — value changed to {value}")
 
     # Schedule
     check_interval_minutes = Column(Integer, default=60)
@@ -58,7 +64,6 @@ class ScraperMonitor(Base):
 
 
 class ScraperCheckLog(Base):
-    """Every check result logged here."""
     __tablename__ = "scraper_check_logs"
 
     id = Column(Integer, primary_key=True, index=True)

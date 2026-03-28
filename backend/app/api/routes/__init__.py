@@ -1,4 +1,3 @@
-# Re-export all API routers from routes subpackage
 from app.api.routes import (
     analytics, auth, datasources, email_api, monitors,
     notifications, organizations, settings, stats,
