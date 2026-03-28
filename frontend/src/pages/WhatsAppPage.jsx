@@ -57,16 +57,16 @@ export default function WhatsAppPage() {
           <MessageCircle size={20} className="text-white" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">WhatsApp</h1>
-          <p className="text-gray-500 text-sm">Send messages via WhatsApp</p>
+          <h1 className="page-title">WhatsApp</h1>
+          <p className="page-subtitle">Send messages via WhatsApp</p>
         </div>
       </div>
 
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+      <div className="flex gap-1 p-1 rounded-lg w-fit" style={{ backgroundColor: 'var(--muted)' }}>
         {['send', 'history'].map(t => (
           <button key={t} onClick={() => handleTabChange(t)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium capitalize transition-colors ${
-              tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              tab === t ? 'bg-card text-foreground shadow-sm' : 'text-muted hover:text-foreground'
             }`}>{t}</button>
         ))}
       </div>
@@ -74,13 +74,13 @@ export default function WhatsAppPage() {
       {tab === 'send' && (
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="card p-5 space-y-4">
-            <h2 className="font-semibold text-gray-900">Recipients</h2>
+            <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Recipients</h2>
             {recipients.map((r, i) => (
               <div key={i} className="flex gap-2">
                 <input className="input flex-1" value={r} onChange={e => setRecipient(i, e.target.value)}
                   placeholder="+254712345678" type="tel" />
                 {recipients.length > 1 && (
-                  <button type="button" onClick={() => removeRecipient(i)} className="btn-ghost p-2 text-red-400 hover:text-red-600 hover:bg-red-50">
+                  <button type="button" onClick={() => removeRecipient(i)} className="p-2 rounded-lg transition-colors" style={{ color: 'var(--muted-foreground)' }} onMouseEnter={(e) => e.target.style.backgroundColor = 'var(--muted)'} onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
                     <X size={16} />
                   </button>
                 )}
@@ -92,11 +92,12 @@ export default function WhatsAppPage() {
           </div>
 
           <div className="card p-5 space-y-3">
-            <h2 className="font-semibold text-gray-900">Message</h2>
+            <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Message</h2>
             <textarea className="input resize-none" rows={5} required maxLength={4096}
               value={message} onChange={e => setMessage(e.target.value)}
-              placeholder="Type your WhatsApp message…" />
-            <p className="text-xs text-gray-400 text-right">{message.length}/4096</p>
+              placeholder="Type your WhatsApp message…" 
+              style={{ backgroundColor: 'var(--card)', color: 'var(--foreground)', borderColor: 'var(--border)' }} />
+            <p className="text-xs text-right" style={{ color: 'var(--muted-foreground)' }}>{message.length}/4096</p>
           </div>
 
           <button type="submit" disabled={loading} className="btn-primary w-full justify-center"
@@ -109,12 +110,12 @@ export default function WhatsAppPage() {
           {results && (
             <div className="card p-5 space-y-3">
               <div className="flex gap-6">
-                <div className="text-center"><p className="text-2xl font-bold text-green-600">{results.sent}</p><p className="text-xs text-gray-500">Sent</p></div>
-                <div className="text-center"><p className="text-2xl font-bold text-red-500">{results.failed}</p><p className="text-xs text-gray-500">Failed</p></div>
+                <div className="text-center"><p className="text-2xl font-bold" style={{ color: 'var(--primary)' }}>{results.sent}</p><p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Sent</p></div>
+                <div className="text-center"><p className="text-2xl font-bold" style={{ color: 'var(--destructive)' }}>{results.failed}</p><p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Failed</p></div>
               </div>
               {results.results.map((r, i) => (
                 <div key={i} className="flex items-center justify-between text-sm">
-                  <span className="font-mono">{r.recipient}</span>
+                  <span className="font-mono" style={{ color: 'var(--foreground)' }}>{r.recipient}</span>
                   <span className={STATUS_COLORS[r.status] || 'badge-gray'}>{r.status}</span>
                 </div>
               ))}
@@ -128,20 +129,20 @@ export default function WhatsAppPage() {
           {historyLoading ? (
             <div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-brand-500 border-t-transparent rounded-full animate-spin" /></div>
           ) : history.length === 0 ? (
-            <div className="card p-10 text-center text-gray-400 text-sm">No messages sent yet.</div>
+            <div className="card p-10 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>No messages sent yet.</div>
           ) : (
             <>
-              <div className="card divide-y divide-gray-100">
+              <div className="card divide-y" style={{ borderColor: 'var(--border)' }}>
                 {history.map(m => (
                   <div key={m.id} className="flex items-start gap-4 px-5 py-4">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900">{m.recipient}</p>
-                      <p className="text-sm text-gray-600 mt-0.5 break-words">{m.message}</p>
-                      {m.error_message && <p className="text-xs text-red-500 mt-1">{m.error_message}</p>}
+                      <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{m.recipient}</p>
+                      <p className="text-sm mt-0.5 break-words" style={{ color: 'var(--muted-foreground)' }}>{m.message}</p>
+                      {m.error_message && <p className="text-xs mt-1" style={{ color: 'var(--destructive)' }}>{m.error_message}</p>}
                     </div>
                     <div className="text-right shrink-0">
                       <span className={STATUS_COLORS[m.status] || 'badge-gray'}>{m.status}</span>
-                      <p className="text-xs text-gray-400 mt-1">
+                      <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
                         {formatDistanceToNow(new Date(m.sent_at || m.created_at), { addSuffix: true })}
                       </p>
                     </div>

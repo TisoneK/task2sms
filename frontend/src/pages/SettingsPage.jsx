@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { User, Lock, CheckCircle2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { User, Lock, CheckCircle2, Sun, Moon } from 'lucide-react'
 import api from '../services/api'
 import useAuthStore from '../store/authStore'
 import toast from 'react-hot-toast'
@@ -10,6 +10,19 @@ export default function SettingsPage() {
   const [passwords, setPasswords] = useState({ current_password: '', new_password: '', confirm: '' })
   const [profileLoading, setProfileLoading] = useState(false)
   const [pwLoading, setPwLoading] = useState(false)
+  const [theme, setTheme] = useState('light')
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme') || 'light'
+    setTheme(savedTheme)
+  }, [])
+
+  const toggleTheme = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light'
+    setTheme(newTheme)
+    document.documentElement.setAttribute('data-theme', newTheme)
+    localStorage.setItem('theme', newTheme)
+  }
 
   const handleProfile = async (e) => {
     e.preventDefault()
@@ -49,8 +62,8 @@ export default function SettingsPage() {
   return (
     <div className="max-w-xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Manage your account</p>
+        <h1 className="page-title">Settings</h1>
+        <p className="page-subtitle">Manage your account</p>
       </div>
 
       {/* Profile */}
@@ -59,13 +72,13 @@ export default function SettingsPage() {
           <div className="w-9 h-9 rounded-lg bg-brand-100 flex items-center justify-center">
             <User size={18} className="text-brand-600" />
           </div>
-          <h2 className="font-semibold text-gray-900">Profile</h2>
+          <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Profile</h2>
         </div>
         <form onSubmit={handleProfile} className="space-y-4">
           <div>
             <label className="label">Username</label>
             <input className="input bg-gray-50 cursor-not-allowed" value={user?.username || ''} disabled />
-            <p className="text-xs text-gray-400 mt-1">Username cannot be changed</p>
+            <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>Username cannot be changed</p>
           </div>
           <div>
             <label className="label">Full Name</label>
@@ -90,7 +103,7 @@ export default function SettingsPage() {
           <div className="w-9 h-9 rounded-lg bg-yellow-50 flex items-center justify-center">
             <Lock size={18} className="text-yellow-600" />
           </div>
-          <h2 className="font-semibold text-gray-900">Change Password</h2>
+          <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Change Password</h2>
         </div>
         <form onSubmit={handlePassword} className="space-y-4">
           <div>
@@ -117,9 +130,54 @@ export default function SettingsPage() {
         </form>
       </div>
 
+      {/* Theme */}
+      <div className="card p-5">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-9 h-9 rounded-lg bg-purple-50 flex items-center justify-center">
+            {theme === 'light' ? <Sun size={18} className="text-purple-600" /> : <Moon size={18} className="text-purple-600" />}
+          </div>
+          <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Appearance</h2>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="label">Theme</label>
+            <div className="flex items-center gap-3 mt-2">
+              <button
+                onClick={() => toggleTheme()}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg border-2 transition-all"
+                style={{
+                  borderColor: theme === 'light' ? 'var(--primary)' : 'var(--border)',
+                  backgroundColor: theme === 'light' ? 'var(--accent)' : 'var(--card)'
+                }}
+              >
+                <Sun size={18} style={{ color: theme === 'light' ? 'var(--primary)' : 'var(--muted-foreground)' }} />
+                <div className="text-left">
+                  <div className="font-medium" style={{ color: theme === 'light' ? 'var(--primary)' : 'var(--foreground)' }}>Light</div>
+                  <div className="text-xs" style={{ color: theme === 'light' ? 'var(--primary)' : 'var(--muted-foreground)' }}>Clean and bright interface</div>
+                </div>
+              </button>
+              <button
+                onClick={() => toggleTheme()}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg border-2 transition-all"
+                style={{
+                  borderColor: theme === 'dark' ? 'var(--primary)' : 'var(--border)',
+                  backgroundColor: theme === 'dark' ? 'var(--accent)' : 'var(--card)'
+                }}
+              >
+                <Moon size={18} style={{ color: theme === 'dark' ? 'var(--primary)' : 'var(--muted-foreground)' }} />
+                <div className="text-left">
+                  <div className="font-medium" style={{ color: theme === 'dark' ? 'var(--primary)' : 'var(--foreground)' }}>Dark</div>
+                  <div className="text-xs" style={{ color: theme === 'dark' ? 'var(--primary)' : 'var(--muted-foreground)' }}>Easy on the eyes</div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Account info */}
       <div className="card p-5">
-        <h2 className="font-semibold text-gray-900 mb-3">Account Info</h2>
+        <h2 className="font-semibold mb-3" style={{ color: 'var(--foreground)' }}>Account Info</h2>
         <dl className="space-y-2 text-sm">
           {[
             ['User ID', `#${user?.id}`],
@@ -127,8 +185,8 @@ export default function SettingsPage() {
             ['Status', user?.is_active ? 'Active' : 'Inactive'],
           ].map(([k, v]) => (
             <div key={k} className="flex items-center justify-between">
-              <dt className="text-gray-500">{k}</dt>
-              <dd className="font-medium text-gray-900">{v}</dd>
+              <dt style={{ color: 'var(--muted-foreground)' }}>{k}</dt>
+              <dd className="font-medium" style={{ color: 'var(--foreground)' }}>{v}</dd>
             </div>
           ))}
         </dl>

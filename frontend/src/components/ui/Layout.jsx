@@ -89,7 +89,7 @@ export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--background)' }}>
       {/* Desktop sidebar */}
       <aside className="hidden md:flex flex-col w-[220px] shrink-0">
         <SidebarContent />
@@ -115,16 +115,17 @@ export default function Layout() {
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Mobile top bar */}
-        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-200">
+        <header className="md:hidden flex items-center gap-3 px-4 py-3 border-b" style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
           <button onClick={() => setMobileOpen(true)}
-            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors">
+            className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            style={{ color: 'var(--muted-foreground)' }}>
             <Menu size={20} />
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1">
             <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--primary)' }}>
               <MessageSquare size={13} className="text-white" />
             </div>
-            <span className="font-semibold text-slate-900 text-sm">Task2SMS</span>
+            <span className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>Task2SMS</span>
           </div>
         </header>
 

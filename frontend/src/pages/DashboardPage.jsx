@@ -13,12 +13,12 @@ function StatCard({ icon: Icon, label, value, sub, color }) {
     <div className="card p-5">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm text-gray-500 font-medium">{label}</p>
-          <p className="text-3xl font-bold text-gray-900 mt-1">{value ?? '—'}</p>
-          {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+          <p className="stat-label">{label}</p>
+          <p className="stat-value">{value ?? '—'}</p>
+          {sub && <p className="stat-sub">{sub}</p>}
         </div>
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${color}`}>
-          <Icon size={18} className="text-white" />
+          <Icon size={18} style={{ color: 'white' }} />
         </div>
       </div>
     </div>
@@ -27,7 +27,7 @@ function StatCard({ icon: Icon, label, value, sub, color }) {
 
 function MiniBarChart({ data }) {
   if (!data || data.length === 0)
-    return <div className="flex items-center justify-center h-24 text-gray-300 text-sm">No data yet</div>
+    return <div className="flex items-center justify-center h-24 text-sm" style={{ color: 'var(--muted-foreground)' }}>No data yet</div>
   const max = Math.max(...data.map(d => d.total), 1)
   return (
     <div className="flex items-end gap-1 h-24 px-1">
@@ -37,10 +37,11 @@ function MiniBarChart({ data }) {
             className="w-full bg-brand-500 rounded-sm opacity-80 hover:opacity-100 transition-opacity"
             style={{ height: `${(d.total / max) * 80}px`, minHeight: 2 }}
           />
-          <span className="text-xs text-gray-300 truncate max-w-full">
+          <span className="text-xs truncate max-w-full" style={{ color: 'var(--muted-foreground)' }}>
             {d.day ? d.day.slice(5) : ''}
           </span>
-          <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none">
+          <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none"
+               style={{ backgroundColor: 'var(--muted)', color: 'var(--card-foreground)' }}>
             {d.day}: {d.sent}/{d.total} sent
           </div>
         </div>
@@ -81,8 +82,8 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Welcome back, {user?.full_name || user?.username}</p>
+          <h1 className="page-title">Dashboard</h1>
+          <p className="page-subtitle">Welcome back, {user?.full_name || user?.username}</p>
         </div>
         <div className="flex gap-2">
           <button onClick={reload} className="btn-ghost p-2" title="Refresh"><RefreshCw size={16} /></button>
@@ -104,11 +105,11 @@ export default function DashboardPage() {
 
       <div className="grid md:grid-cols-3 gap-4">
         <div className="card p-5 md:col-span-2">
-          <h2 className="font-semibold text-gray-900 mb-4">SMS Activity (Last 7 Days)</h2>
+          <h2 className="font-semibold mb-4" style={{ color: 'var(--foreground)' }}>SMS Activity (Last 7 Days)</h2>
           <MiniBarChart data={stats?.daily_sms} />
         </div>
         <div className="card p-5">
-          <h2 className="font-semibold text-gray-900 mb-4">Providers</h2>
+          <h2 className="font-semibold mb-4" style={{ color: 'var(--foreground)' }}>Providers</h2>
           {stats?.providers && Object.keys(stats.providers).length > 0 ? (
             <div className="space-y-3">
               {Object.entries(stats.providers).map(([provider, count]) => {
@@ -117,10 +118,10 @@ export default function DashboardPage() {
                 return (
                   <div key={provider}>
                     <div className="flex justify-between text-sm mb-1">
-                      <span className="font-medium capitalize text-gray-700">{provider}</span>
-                      <span className="text-gray-400">{count} ({pct}%)</span>
+                      <span className="font-medium capitalize" style={{ color: 'var(--foreground)' }}>{provider}</span>
+                      <span style={{ color: 'var(--muted-foreground)' }}>{count} ({pct}%)</span>
                     </div>
-                    <div className="h-1.5 bg-gray-100 rounded-full">
+                    <div className="h-1.5 rounded-full" style={{ backgroundColor: 'var(--muted)' }}>
                       <div className="h-full bg-brand-500 rounded-full" style={{ width: `${pct}%` }} />
                     </div>
                   </div>
@@ -128,54 +129,54 @@ export default function DashboardPage() {
               })}
             </div>
           ) : (
-            <p className="text-sm text-gray-400 text-center py-6">No SMS sent yet</p>
+            <p className="text-sm text-center py-6" style={{ color: 'var(--muted-foreground)' }}>No SMS sent yet</p>
           )}
         </div>
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
         <div className="card">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-900">Recent Tasks</h2>
-            <Link to="/tasks" className="text-sm text-brand-600 hover:underline">View all</Link>
+          <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+            <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Recent Tasks</h2>
+            <Link to="/tasks" className="text-sm hover:underline" style={{ color: 'var(--primary)' }}>View all</Link>
           </div>
-          <div className="divide-y divide-gray-50">
+          <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
             {tasksLoading
               ? <div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" /></div>
               : recentTasks.length === 0
-              ? <div className="px-5 py-8 text-center text-gray-400 text-sm">No tasks. <Link to="/tasks/new" className="text-brand-600">Create one</Link></div>
+              ? <div className="px-5 py-8 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>No tasks. <Link to="/tasks/new" style={{ color: 'var(--primary)' }}>Create one</Link></div>
               : recentTasks.map(task => (
                 <div key={task.id} className="flex items-center gap-3 px-5 py-3">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{task.name}</p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>{task.name}</p>
+                    <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                       {task.last_run_at ? `Last run ${formatDistanceToNow(new Date(task.last_run_at), { addSuffix: true })}` : 'Never run'}
                     </p>
                   </div>
                   <span className={task.status === 'active' ? 'badge-green' : task.status === 'paused' ? 'badge-yellow' : task.status === 'failed' ? 'badge-red' : 'badge-gray'}>{task.status}</span>
-                  <button onClick={() => runTask(task.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50" title="Run now"><Play size={14} /></button>
+                  <button onClick={() => runTask(task.id)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" style={{ color: 'var(--muted-foreground)' }} title="Run now"><Play size={14} /></button>
                 </div>
               ))}
           </div>
         </div>
 
         <div className="card">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-900">Recent SMS</h2>
-            <Link to="/notifications" className="text-sm text-brand-600 hover:underline">View all</Link>
+          <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+            <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Recent SMS</h2>
+            <Link to="/notifications" className="text-sm hover:underline" style={{ color: 'var(--primary)' }}>View all</Link>
           </div>
-          <div className="divide-y divide-gray-50">
+          <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
             {recentNotifs.length === 0
-              ? <div className="px-5 py-8 text-center text-gray-400 text-sm">No SMS sent yet.</div>
+              ? <div className="px-5 py-8 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>No SMS sent yet.</div>
               : recentNotifs.map(n => (
                 <div key={n.id} className="flex items-center gap-3 px-5 py-3">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{n.recipient}</p>
-                    <p className="text-xs text-gray-400 truncate">{n.message}</p>
+                    <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{n.recipient}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--muted-foreground)' }}>{n.message}</p>
                   </div>
                   <div className="text-right shrink-0">
                     <span className={n.status === 'sent' ? 'badge-green' : n.status === 'failed' ? 'badge-red' : 'badge-yellow'}>{n.status}</span>
-                    <p className="text-xs text-gray-300 mt-0.5">{n.provider}</p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>{n.provider}</p>
                   </div>
                 </div>
               ))}

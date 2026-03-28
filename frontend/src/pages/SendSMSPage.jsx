@@ -41,13 +41,13 @@ export default function SendSMSPage() {
   return (
     <div className="max-w-xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Send SMS</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Send a one-off SMS immediately</p>
+        <h1 className="page-title">Send SMS</h1>
+        <p className="page-subtitle">Send a one-off SMS immediately</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="card p-5 space-y-4">
-          <h2 className="font-semibold text-gray-900">Recipients</h2>
+          <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Recipients</h2>
           {recipients.map((r, i) => (
             <div key={i} className="flex gap-2">
               <input
@@ -74,7 +74,7 @@ export default function SendSMSPage() {
         </div>
 
         <div className="card p-5 space-y-4">
-          <h2 className="font-semibold text-gray-900">Message</h2>
+          <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Message</h2>
           <div>
             <label className="label">Message *</label>
             <textarea
@@ -86,7 +86,7 @@ export default function SendSMSPage() {
               onChange={e => setMessage(e.target.value)}
               placeholder="Type your message here..."
             />
-            <p className="text-xs text-gray-400 mt-1 text-right">{message.length}/640</p>
+            <p className="text-xs mt-1 text-right" style={{ color: 'var(--muted-foreground)' }}>{message.length}/640</p>
           </div>
           <div>
             <label className="label">Provider (optional)</label>
@@ -109,18 +109,18 @@ export default function SendSMSPage() {
         <div className="card p-5 space-y-3">
           <div className="flex items-center gap-4">
             <div className="text-center">
-              <p className="text-2xl font-bold text-green-600">{results.sent}</p>
-              <p className="text-xs text-gray-500">Sent</p>
+              <p className="text-2xl font-bold" style={{ color: 'var(--primary)' }}>{results.sent}</p>
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Sent</p>
             </div>
             <div className="text-center">
-              <p className="text-2xl font-bold text-red-500">{results.failed}</p>
-              <p className="text-xs text-gray-500">Failed</p>
+              <p className="text-2xl font-bold" style={{ color: 'var(--destructive)' }}>{results.failed}</p>
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Failed</p>
             </div>
           </div>
           <div className="space-y-2">
             {results.results.map((r, i) => (
               <div key={i} className="flex items-center justify-between text-sm">
-                <span className="font-mono text-gray-700">{r.recipient}</span>
+                <span className="font-mono" style={{ color: 'var(--foreground)' }}>{r.recipient}</span>
                 {r.success
                   ? <span className="badge-green">sent</span>
                   : <span className="badge-red" title={r.error}>failed</span>

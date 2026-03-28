@@ -60,8 +60,8 @@ export default function TasksPage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Tasks</h1>
-          <p className="text-gray-500 text-sm">{total} task{total !== 1 ? 's' : ''} total</p>
+          <h1 className="page-title">Tasks</h1>
+          <p className="page-subtitle">{total} task{total !== 1 ? 's' : ''} total</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => reload(page)} className="btn-ghost p-2" title="Refresh">
@@ -74,7 +74,7 @@ export default function TasksPage() {
       {/* Search + Filter bar */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--muted-foreground)' }} />
           <input
             className="input pl-9"
             placeholder="Search tasks…"
@@ -82,11 +82,11 @@ export default function TasksPage() {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg shrink-0">
+        <div className="flex gap-1 p-1 rounded-lg shrink-0" style={{ backgroundColor: 'var(--muted)' }}>
           {STATUS_OPTIONS.map(s => (
             <button key={s} onClick={() => setStatusFilter(s)}
               className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors capitalize ${
-                statusFilter === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                statusFilter === s ? 'bg-card text-foreground shadow-sm' : 'text-muted hover:text-foreground'
               }`}>
               {s}
             </button>
@@ -108,12 +108,12 @@ export default function TasksPage() {
           />
         </div>
       ) : (
-        <div className="card divide-y divide-gray-100">
+        <div className="card divide-y" style={{ borderColor: 'var(--border)' }}>
           {tasks.map(task => (
-            <div key={task.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-4 hover:bg-gray-50 transition-colors">
+            <div key={task.id} className="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-4 transition-colors" style={{ backgroundColor: 'transparent' }} onMouseEnter={(e) => e.target.style.backgroundColor = 'var(--muted)' } onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent' }>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-semibold text-gray-900">{task.name}</p>
+                  <p className="font-semibold" style={{ color: 'var(--foreground)' }}>{task.name}</p>
                   <span className={
                     task.status === 'active' ? 'badge-green' :
                     task.status === 'paused' ? 'badge-yellow' :
@@ -121,11 +121,11 @@ export default function TasksPage() {
                   }>{task.status}</span>
                   {task.condition_enabled && <span className="badge-blue">conditional</span>}
                   {task.sms_provider && (
-                    <span className="badge bg-gray-100 text-gray-600">{task.sms_provider}</span>
+                    <span className="badge" style={{ backgroundColor: 'var(--muted)', color: 'var(--muted-foreground)' }}>{task.sms_provider}</span>
                   )}
                 </div>
-                <p className="text-xs text-gray-400 mt-0.5">{scheduleLabel(task)}</p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>{scheduleLabel(task)}</p>
+                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                   {task.recipients.length} recipient{task.recipients.length !== 1 ? 's' : ''}
                   {' · '}
                   {task.run_count} run{task.run_count !== 1 ? 's' : ''}
@@ -135,20 +135,20 @@ export default function TasksPage() {
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button onClick={() => handleRun(task.id)}
-                  className="btn-ghost p-2 text-gray-400 hover:text-brand-600 hover:bg-brand-50" title="Run now">
+                  className="p-2 rounded-lg transition-colors" style={{ color: 'var(--muted-foreground)' }} onMouseEnter={(e) => e.target.style.backgroundColor = 'var(--muted)' } onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent' } title="Run now">
                   <Play size={15} />
                 </button>
                 <button onClick={() => handleToggle(task.id)}
                   className="btn-ghost p-2" title={task.status === 'active' ? 'Pause' : 'Activate'}>
                   {task.status === 'active'
                     ? <ToggleRight size={15} className="text-green-500" />
-                    : <ToggleLeft size={15} className="text-gray-400" />}
+                    : <ToggleLeft size={15} style={{ color: 'var(--muted-foreground)' }} />}
                 </button>
-                <Link to={`/tasks/${task.id}/edit`} className="btn-ghost p-2 text-gray-400 hover:text-brand-600" title="Edit">
+                <Link to={`/tasks/${task.id}/edit`} className="p-2 rounded-lg transition-colors" style={{ color: 'var(--muted-foreground)' }} onMouseEnter={(e) => e.target.style.backgroundColor = 'var(--muted)' } onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent' } title="Edit">
                   <Pencil size={15} />
                 </Link>
                 <button onClick={() => setConfirmDelete({ id: task.id, name: task.name })}
-                  className="btn-ghost p-2 text-gray-400 hover:text-red-600 hover:bg-red-50" title="Delete">
+                  className="p-2 rounded-lg transition-colors" style={{ color: 'var(--muted-foreground)' }} onMouseEnter={(e) => e.target.style.backgroundColor = 'var(--muted)' } onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent' } title="Delete">
                   <Trash2 size={15} />
                 </button>
               </div>
