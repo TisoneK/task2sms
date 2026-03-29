@@ -257,9 +257,10 @@ def validate_kenyan_phone_number(phone):
     
     for pattern, description in patterns.items():
         if re.match(pattern, clean_phone):
-            # Determine carrier from prefix
-            prefix = clean_phone[-9:-7] if len(clean_phone) >= 9 else ""
-            carrier = get_kenyan_carrier(prefix)
+            # Determine carrier from prefix (use 3 digits for accuracy)
+            prefix3 = clean_phone[-9:-6] if len(clean_phone) >= 9 else ""
+            prefix2 = clean_phone[-9:-7] if len(clean_phone) >= 9 else ""
+            carrier = get_kenyan_carrier(prefix3, prefix2)
             return {
                 "valid": True,
                 "format": description,
@@ -273,31 +274,70 @@ def validate_kenyan_phone_number(phone):
         "suggestion": "Use format: +2547XXXXXXXX or 07XXXXXXXX"
     }
 
-def get_kenyan_carrier(prefix):
-    """Determine carrier from phone prefix"""
+def get_kenyan_carrier(prefix3, prefix2=""):
+    """Determine carrier from phone prefix.
     
-    carriers = {
-        "10": "Safaricom",
-        "11": "Safaricom", 
-        "12": "Safaricom",
-        "20": "Airtel",
-        "21": "Airtel",
-        "22": "Airtel",
-        "30": "Telkom Kenya",
-        "31": "Telkom Kenya",
-        "70": "Safaricom",
-        "71": "Safaricom",
-        "72": "Safaricom",
-        "73": "Airtel",
-        "74": "Airtel",
-        "75": "Telkom Kenya",
-        "76": "Safaricom",
-        "77": "Safaricom",
-        "78": "Airtel",
-        "79": "Safaricom"
+    Uses 3-digit prefixes first (more accurate), falls back to 2-digit.
+    Source: CA Kenya number allocation + operator self-reporting.
+    
+    Note: Safaricom owns 700-729, 740-743, 745-746, 757-759, 768-769, 790-799.
+          Airtel owns 730-739, 750-756, 780-789.
+          Telkom owns 770-779.
+    """
+    # 3-digit map takes priority — catches cases like 741 (Safaricom) vs 730 (Airtel)
+    carriers3 = {
+        # Safaricom 07xx
+        "700": "Safaricom", "701": "Safaricom", "702": "Safaricom", "703": "Safaricom",
+        "704": "Safaricom", "705": "Safaricom", "706": "Safaricom", "707": "Safaricom",
+        "708": "Safaricom", "709": "Safaricom",
+        "710": "Safaricom", "711": "Safaricom", "712": "Safaricom", "713": "Safaricom",
+        "714": "Safaricom", "715": "Safaricom", "716": "Safaricom", "717": "Safaricom",
+        "718": "Safaricom", "719": "Safaricom",
+        "720": "Safaricom", "721": "Safaricom", "722": "Safaricom", "723": "Safaricom",
+        "724": "Safaricom", "725": "Safaricom", "726": "Safaricom", "727": "Safaricom",
+        "728": "Safaricom", "729": "Safaricom",
+        # Airtel 073x
+        "730": "Airtel", "731": "Airtel", "732": "Airtel", "733": "Airtel",
+        "734": "Airtel", "735": "Airtel", "736": "Airtel", "737": "Airtel",
+        "738": "Airtel", "739": "Airtel",
+        # Safaricom 074x (740–746), Airtel 747–749
+        "740": "Safaricom", "741": "Safaricom", "742": "Safaricom", "743": "Safaricom",
+        "744": "Safaricom", "745": "Safaricom", "746": "Safaricom",
+        "747": "Airtel",    "748": "Airtel",    "749": "Airtel",
+        # Airtel 075x
+        "750": "Airtel", "751": "Airtel", "752": "Airtel", "753": "Airtel",
+        "754": "Airtel", "755": "Airtel", "756": "Airtel",
+        # Safaricom 0757–0759
+        "757": "Safaricom", "758": "Safaricom", "759": "Safaricom",
+        # Telkom 077x
+        "770": "Telkom Kenya", "771": "Telkom Kenya", "772": "Telkom Kenya",
+        "773": "Telkom Kenya", "774": "Telkom Kenya", "775": "Telkom Kenya",
+        "776": "Telkom Kenya", "777": "Telkom Kenya", "778": "Telkom Kenya",
+        "779": "Telkom Kenya",
+        # Airtel 078x
+        "780": "Airtel", "781": "Airtel", "782": "Airtel", "783": "Airtel",
+        "784": "Airtel", "785": "Airtel", "786": "Airtel", "787": "Airtel",
+        "788": "Airtel", "789": "Airtel",
+        # Safaricom 079x
+        "790": "Safaricom", "791": "Safaricom", "792": "Safaricom", "793": "Safaricom",
+        "794": "Safaricom", "795": "Safaricom", "796": "Safaricom", "797": "Safaricom",
+        "798": "Safaricom", "799": "Safaricom",
+        # Safaricom 011x
+        "110": "Safaricom", "111": "Safaricom", "112": "Safaricom", "113": "Safaricom",
+        "114": "Safaricom", "115": "Safaricom",
     }
-    
-    return carriers.get(prefix, "Unknown")
+
+    if prefix3 in carriers3:
+        return carriers3[prefix3]
+
+    # 2-digit fallback (less accurate but better than nothing)
+    carriers2 = {
+        "10": "Safaricom", "11": "Safaricom", "12": "Safaricom",
+        "20": "Airtel",    "21": "Airtel",    "22": "Airtel",
+        "30": "Telkom Kenya", "31": "Telkom Kenya",
+        "76": "Safaricom", "77": "Safaricom", "79": "Safaricom",
+    }
+    return carriers2.get(prefix2, "Unknown")
 
 def check_dnd_status(phone):
     """Provide DND checking guidance for Kenyan numbers"""

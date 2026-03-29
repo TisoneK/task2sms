@@ -18,7 +18,7 @@ export default function NotificationsPage() {
   const { notifications, total, page, loading, reload } = useNotifications(1, PER_PAGE)
   const [filter, setFilter] = useState('all')
 
-  const filtered = filter === 'all' ? notifications : notifications.filter(n => n.status === filter)
+  const filtered = filter === 'all' ? notifications : filter === 'pending' ? notifications.filter(n => ['pending','retrying'].includes(n.status)) : notifications.filter(n => n.status === filter)
   const counts = { all: notifications.length,
     sent: notifications.filter(n => n.status === 'sent').length,
     failed: notifications.filter(n => n.status === 'failed').length,
@@ -31,8 +31,8 @@ export default function NotificationsPage() {
     <div className="space-y-5 animate-fade-in">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Notification History</h1>
-          <p className="page-subtitle">{total} total SMS messages</p>
+          <h1 className="page-title">SMS History</h1>
+          <p className="page-subtitle">{total} total messages</p>
         </div>
         <button onClick={() => reload(page)} className="btn-secondary">
           <RefreshCw size={14} /> Refresh
@@ -60,8 +60,8 @@ export default function NotificationsPage() {
 
       {filtered.length === 0 ? (
         <div className="card">
-          <EmptyState icon={Bell} title="No notifications"
-            description={filter !== 'all' ? `No ${filter} messages` : 'SMS will appear here once sent'} />
+          <EmptyState icon={Bell} title="No messages"
+            description={filter === 'pending' ? 'No pending or retrying messages' : filter !== 'all' ? `No ${filter} messages` : 'Sent messages will appear here'} />
         </div>
       ) : (
         <div className="card divide-y" style={{ borderColor: 'var(--border)' }}>

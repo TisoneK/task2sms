@@ -35,8 +35,10 @@ async def send_sms_now(
 ):
     provider = get_provider(payload.provider)
     results = []
+
     for recipient in payload.recipients:
         result = await provider.send(recipient, payload.message)
+
         notif = Notification(
             user_id=current_user.id,
             recipient=recipient,
@@ -49,8 +51,14 @@ async def send_sms_now(
             sent_at=datetime.now(timezone.utc) if result.success else None,
         )
         db.add(notif)
-        results.append({"recipient": recipient, "success": result.success,
-                         "error": result.error})
+
+        results.append({
+            "recipient":  recipient,
+            "success":    result.success,
+            "error":      result.error,       # human-readable error string or None
+            "statusCode": result.status_code, # raw AT integer code, for frontend lookup
+        })
+
     await db.commit()
     sent = sum(1 for r in results if r["success"])
     return {"sent": sent, "failed": len(results) - sent, "results": results}

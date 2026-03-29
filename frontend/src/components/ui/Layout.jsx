@@ -27,7 +27,7 @@ const NAV = [
   { to: '/whatsapp',      icon: MessageCircle,    label: 'WhatsApp' },
   { to: '/telegram',      icon: TelegramIcon,     label: 'Telegram' },
   { to: '/email',         icon: Mail,             label: 'Email' },
-  { to: '/notifications', icon: Bell,             label: 'History' },
+  { to: '/notifications', icon: Bell,             label: 'SMS History' },
   { section: 'INTEGRATIONS' },
   { to: '/datasources',   icon: Database,         label: 'Data Sources' },
   { to: '/scraper',       icon: Globe,            label: 'Web Monitor' },

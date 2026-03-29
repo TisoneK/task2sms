@@ -8,11 +8,13 @@ logger = logging.getLogger(__name__)
 
 class SMSResult:
     def __init__(self, success: bool, message_id: Optional[str] = None,
-                 response: Optional[Dict] = None, error: Optional[str] = None):
+                 response: Optional[Dict] = None, error: Optional[str] = None,
+                 status_code: Optional[int] = None):
         self.success = success
         self.message_id = message_id
         self.response = response or {}
         self.error = error
+        self.status_code = status_code  # raw AT statusCode, passed to frontend
 
 
 class SMSProvider(ABC):
@@ -24,6 +26,50 @@ class SMSProvider(ABC):
     @abstractmethod
     def name(self) -> str:
         pass
+
+
+# Africa's Talking statusCode reference (from official API docs):
+# SUCCESS — message was accepted and will be / has been delivered:
+#   100 = Waiting to be delivered (queued — counts as SENT)
+#   101 = Sent to carrier
+# FAILURE — message was rejected:
+#   102 = Invalid phone number
+#   103 = Low account balance
+#   104 = Unsupported number type
+#   105 = Invalid Sender ID / Unable to process request
+#   106 = Invalid number
+#   401 = Risk Hold
+#   402 = Invalid senderId for this account
+#   403 = Invalid phone number
+#   404 = Subscriber absent
+#   405 = Insufficient balance
+#   406 = User In Blacklist (DND)
+#   407 = Could Not Route
+#   409 = Do Not Disturb
+#   500 = Internal Server Error
+#   501 = Rejected
+
+AT_SUCCESS_CODES = {100, 101}
+
+AT_STATUS_MAP = {
+    100: {"label": "Queued",                  "success": True,  "solution": None},
+    101: {"label": "Sent",                     "success": True,  "solution": None},
+    102: {"label": "Invalid Phone Number",     "success": False, "solution": "Check the number is in international format, e.g. +254712345678."},
+    103: {"label": "Low Account Balance",      "success": False, "solution": "Top up your Africa's Talking account at account.africastalking.com."},
+    104: {"label": "Unsupported Number Type",  "success": False, "solution": "This number type cannot receive SMS via this route."},
+    105: {"label": "Invalid Sender ID",        "success": False, "solution": "Your Sender ID may not be approved. Try sending without a Sender ID."},
+    106: {"label": "Invalid Number",           "success": False, "solution": "Check the phone number and try again."},
+    401: {"label": "Risk Hold",                "success": False, "solution": "Your account has been flagged for review. Contact Africa's Talking support."},
+    402: {"label": "Invalid Sender ID",        "success": False, "solution": "This Sender ID is not approved for your account."},
+    403: {"label": "Invalid Phone Number",     "success": False, "solution": "The number could not be validated. Check the format."},
+    404: {"label": "Subscriber Absent",        "success": False, "solution": "The subscriber's phone is off or out of coverage. Try again later."},
+    405: {"label": "Insufficient Balance",     "success": False, "solution": "Top up your Africa's Talking account at account.africastalking.com."},
+    406: {"label": "Number Blacklisted / DND", "success": False, "solution": "Recipient opted out of SMS. Safaricom: dial *456*9*5*1#. Airtel: dial *321#. Telkom: dial *456#."},
+    407: {"label": "Could Not Route",          "success": False, "solution": "Message could not be routed. Try again or contact Africa's Talking support."},
+    409: {"label": "Do Not Disturb",           "success": False, "solution": "Recipient is on the DND registry. Safaricom: dial *456*9*5*1#. Airtel: dial *321#."},
+    500: {"label": "Internal Server Error",    "success": False, "solution": "Africa's Talking internal error. Try again in a few minutes."},
+    501: {"label": "Rejected",                 "success": False, "solution": "Message was rejected. Contact Africa's Talking support if this persists."},
+}
 
 
 class AfricasTalkingProvider(SMSProvider):
@@ -43,65 +89,47 @@ class AfricasTalkingProvider(SMSProvider):
             kwargs = {"message": message, "recipients": [to]}
             if settings.AT_SENDER_ID and settings.AT_SENDER_ID.strip():
                 kwargs["senderId"] = settings.AT_SENDER_ID
-            
-            # Enhanced logging - Request details
-            logger.info(f"🔄 Africa's Talking API Request:")
-            logger.info(f"   Recipient: {to}")
-            logger.info(f"   Message: {message}")
-            logger.info(f"   Sender ID: {kwargs.get('senderId', 'None')}")
-            logger.info(f"   Username: {settings.AT_USERNAME}")
-            
+
+            logger.info(f"AT SMS → {to} | sender={kwargs.get('senderId', 'none')} | user={settings.AT_USERNAME}")
+
             response = await loop.run_in_executor(None, lambda: self._sms.send(**kwargs))
-            
-            # Enhanced logging - Full response
-            logger.info(f"📥 Africa's Talking API Response:")
-            logger.info(f"   Full Response: {response}")
-            
+
+            logger.info(f"AT raw response: {response}")
+
             recipients = response.get("SMSMessageData", {}).get("Recipients", [])
-            if recipients:
-                r = recipients[0]
-                status_code = r.get("statusCode")
-                status = r.get("status")
-                message_id = r.get("messageId")
-                
-                # Enhanced logging - Recipient details
-                logger.info(f"📊 Recipient Details:")
-                logger.info(f"   Status Code: {status_code}")
-                logger.info(f"   Status: {status}")
-                logger.info(f"   Message ID: {message_id}")
-                
-                # Enhanced status code interpretation with user-friendly messages
-                status_meanings = {
-                    101: {"status": "Success", "message": "Message sent successfully"},
-                    100: {"status": "Pending", "message": "Message queued for delivery"},
-                    102: {"status": "Invalid Number", "message": "Invalid phone number format"},
-                    103: {"status": "Insufficient Balance", "message": "Account balance too low"},
-                    104: {"status": "Invalid Sender ID", "message": "Sender ID not approved"},
-                    105: {"status": "Generic Error", "message": "Contact support"},
-                    106: {"status": "Service Unavailable", "message": "Service temporarily unavailable"},
-                    406: {"status": "Blacklisted/DND", "message": "Number in DND registry - dial *456*9*5*1# to enable"}
-                }
-                
-                if status_code in status_meanings:
-                    status_info = status_meanings[status_code]
-                    logger.info(f"   Status: {status_info['status']}")
-                    logger.info(f"   Message: {status_info['message']}")
-                
-                if status_code == 101:
-                    logger.info(f"✅ SMS sent successfully to {to}")
-                    return SMSResult(True, message_id=message_id, response=response)
-                else:
-                    # Get user-friendly error message
-                    error_message = status_meanings.get(status_code, {}).get('message', f"Unknown error (code: {status_code})")
-                    status_label = status_meanings.get(status_code, {}).get('status', 'Unknown')
-                    logger.error(f"❌ SMS failed to {to} - {status_label}: {error_message}")
-                    return SMSResult(False, error=f"{status_label}: {error_message}", response=response)
-            
-            logger.error(f"❌ No recipients in response for {to}")
-            return SMSResult(False, error="No recipients in response", response=response)
-            
+            if not recipients:
+                logger.error(f"AT: no recipients in response for {to}")
+                return SMSResult(False, error="No recipients in response", response=response)
+
+            r = recipients[0]
+            status_code = r.get("statusCode")   # integer from AT SDK
+            status_text = r.get("status", "")   # human string from AT SDK
+            message_id  = r.get("messageId")
+
+            info = AT_STATUS_MAP.get(status_code)
+
+            if info:
+                is_success = info["success"]
+                label      = info["label"]
+                solution   = info["solution"]
+            else:
+                # Unknown code — fall back to the text status field
+                is_success = status_text.lower() in ("success", "sent", "waiting to be delivered")
+                label      = status_text or f"Unknown (code {status_code})"
+                solution   = None
+
+            logger.info(f"AT result for {to}: code={status_code} text='{status_text}' success={is_success}")
+
+            if is_success:
+                return SMSResult(True, message_id=message_id, response=response, status_code=status_code)
+            else:
+                error_msg = label
+                if solution:
+                    error_msg = f"{label}: {solution}"
+                return SMSResult(False, error=error_msg, response=response, status_code=status_code)
+
         except Exception as e:
-            logger.error(f"💥 Africa's Talking exception for {to}: {e}")
+            logger.error(f"AT exception for {to}: {e}")
             return SMSResult(False, error=str(e))
 
 

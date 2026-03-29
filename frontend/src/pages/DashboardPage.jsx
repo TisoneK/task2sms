@@ -184,7 +184,7 @@ export default function DashboardPage() {
         <div className="card">
           <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
             <h2 className="font-semibold" style={{ color: 'var(--foreground)' }}>Recent SMS</h2>
-            <Link to="/notifications" className="text-sm hover:underline" style={{ color: 'var(--primary)' }}>View all</Link>
+            <Link to="/notifications" className="text-sm hover:underline" style={{ color: 'var(--primary)' }}>SMS History →</Link>
           </div>
           <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
             {recentNotifs.length === 0
