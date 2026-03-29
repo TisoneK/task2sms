@@ -5,6 +5,30 @@ import toast from 'react-hot-toast'
 
 const PROVIDERS = ['africastalking', 'twilio', 'gsm']
 
+const getErrorDetails = (errorString) => {
+  if (!errorString) return []
+  
+  // Parse error string like "Blacklisted/DND: Number in DND registry - dial *456*9*5*1# to enable"
+  const parts = errorString.split(':')
+  if (parts.length < 2) return [{ message: errorString }]
+  
+  const errorType = parts[0].trim()
+  const details = parts[1].trim()
+  
+  // Split details by dash for message and solution
+  const detailParts = details.split('-')
+  const message = detailParts[0]?.trim() || ''
+  const solution = detailParts[1]?.trim() || ''
+  
+  return [
+    {
+      type: errorType,
+      message: message,
+      solution: solution
+    }
+  ]
+}
+
 export default function SendSMSPage() {
   const [recipients, setRecipients] = useState([''])
   const [message, setMessage] = useState('')
@@ -117,14 +141,37 @@ export default function SendSMSPage() {
               <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Failed</p>
             </div>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {results.results.map((r, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
-                <span className="font-mono" style={{ color: 'var(--foreground)' }}>{r.recipient}</span>
-                {r.success
-                  ? <span className="badge-green">sent</span>
-                  : <span className="badge-red" title={r.error}>failed</span>
-                }
+              <div key={i} className="border rounded-lg p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-sm" style={{ color: 'var(--foreground)' }}>{r.recipient}</span>
+                  {r.success ? (
+                    <span className="px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800">Sent</span>
+                  ) : (
+                    <div className="text-right">
+                      <span className="px-2 py-1 text-xs font-medium rounded bg-red-100 text-red-800">Failed</span>
+                    </div>
+                  )}
+                </div>
+                
+                {!r.success && r.error && (
+                  <div className="bg-gray-50 rounded p-3 space-y-2">
+                    {getErrorDetails(r.error).map((detail, idx) => (
+                      <div key={idx} className="text-sm">
+                        {detail.type && (
+                          <div className="font-medium text-gray-900">{detail.type}</div>
+                        )}
+                        {detail.message && (
+                          <div className="text-gray-700">{detail.message}</div>
+                        )}
+                        {detail.solution && (
+                          <div className="text-blue-700 font-medium pt-1">{detail.solution}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
