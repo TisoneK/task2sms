@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.schemas.schemas import NotificationOut, SendSMSRequest, PaginatedResponse
@@ -7,6 +8,7 @@ from app.services.notification_service import get_notifications
 from app.services.sms_service import get_provider
 from app.models.notification import Notification, NotificationStatus
 from datetime import datetime, timezone
+from typing import List, Optional
 import math
 
 router = APIRouter(tags=["notifications"])
@@ -25,6 +27,53 @@ async def list_notifications(
         total=total, page=page, per_page=per_page,
         pages=math.ceil(total / per_page) if total else 0
     )
+
+
+@router.delete("/notifications/{notification_id}", response_model=dict)
+async def delete_notification(
+    notification_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Notification).where(
+            Notification.id == notification_id,
+            Notification.user_id == current_user.id,
+        )
+    )
+    notif = result.scalar_one_or_none()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Message not found")
+    await db.delete(notif)
+    await db.commit()
+    return {"deleted": notification_id}
+
+
+@router.delete("/notifications", response_model=dict)
+async def clear_all_notifications(
+    status: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Delete all notifications for current user, optionally filtered by status."""
+    q = delete(Notification).where(Notification.user_id == current_user.id)
+    if status:
+        # Allow clearing a specific status group: "failed", "pending", etc.
+        # "pending" clears both pending and retrying (same as the UI filter)
+        if status == "pending":
+            statuses = [NotificationStatus.PENDING, NotificationStatus.RETRYING]
+            q = delete(Notification).where(
+                Notification.user_id == current_user.id,
+                Notification.status.in_(statuses),
+            )
+        else:
+            q = delete(Notification).where(
+                Notification.user_id == current_user.id,
+                Notification.status == status,
+            )
+    result = await db.execute(q)
+    await db.commit()
+    return {"deleted": result.rowcount}
 
 
 @router.post("/sms/send", response_model=dict)
@@ -55,8 +104,8 @@ async def send_sms_now(
         results.append({
             "recipient":  recipient,
             "success":    result.success,
-            "error":      result.error,       # human-readable error string or None
-            "statusCode": result.status_code, # raw AT integer code, for frontend lookup
+            "error":      result.error,
+            "statusCode": result.status_code,
         })
 
     await db.commit()

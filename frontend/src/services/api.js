@@ -40,8 +40,10 @@ export const tasksApi = {
 }
 
 export const notificationsApi = {
-  list:    (page = 1, perPage = 50) => api.get(`/notifications?page=${page}&per_page=${perPage}`),
-  sendSms: (d) => api.post('/sms/send', d),
+  list:      (page = 1, perPage = 50) => api.get(`/notifications?page=${page}&per_page=${perPage}`),
+  sendSms:   (d) => api.post('/sms/send', d),
+  deleteOne: (id) => api.delete(`/notifications/${id}`),
+  clearAll:  (status) => api.delete('/notifications', { params: status ? { status } : {} }),
 }
 
 export const analyticsApi = {

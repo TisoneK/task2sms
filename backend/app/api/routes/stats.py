@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, case
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.task import Task, TaskStatus
@@ -35,13 +35,14 @@ async def get_stats(
     )
     notif_map = {str(s): c for s, c in notif_counts}
 
-    # SMS sent last 7 days (daily breakdown)
+    # SMS sent last 7 days — use case() instead of func.cast(bool, int),
+    # which is not supported in SQLite
     daily_rows = await db.execute(
         select(
             func.date(Notification.created_at).label("day"),
             func.count(Notification.id).label("total"),
             func.sum(
-                func.cast(Notification.status == NotificationStatus.SENT, int)
+                case((Notification.status == NotificationStatus.SENT, 1), else_=0)
             ).label("sent"),
         )
         .where(
@@ -73,9 +74,9 @@ async def get_stats(
         },
         "notifications": {
             "total": sum(notif_map.values()),
-            "sent": notif_map.get("sent", 0),
-            "failed": notif_map.get("failed", 0),
-            "pending": notif_map.get("pending", 0),
+            "sent":     notif_map.get("sent", 0),
+            "failed":   notif_map.get("failed", 0),
+            "pending":  notif_map.get("pending", 0),
             "retrying": notif_map.get("retrying", 0),
         },
         "daily_sms": daily,

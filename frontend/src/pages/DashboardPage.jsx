@@ -1,33 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ListTodo, Plus, Play, TrendingUp, Activity, XCircle, ChevronDown, RefreshCw } from 'lucide-react'
-import { tasksApi, notificationsApi, analyticsApi } from '../services/api'
+import { ListTodo, Plus, Play, TrendingUp, Activity, XCircle, RefreshCw } from 'lucide-react'
+import { tasksApi, notificationsApi } from '../services/api'
 import { useStats } from '../hooks/useData'
 import { formatDistanceToNow } from 'date-fns'
 import { SpinnerPage } from '../components/ui/Feedback'
 import toast from 'react-hot-toast'
 import useAuthStore from '../store/authStore'
 
-const getErrorDetails = (errorString) => {
-  if (!errorString) return []
-  
-  const parts = errorString.split(':')
-  if (parts.length < 2) return [{ message: errorString }]
-  
-  const errorType = parts[0].trim()
-  const details = parts[1].trim()
-  const detailParts = details.split('-')
-  const message = detailParts[0]?.trim() || ''
-  const solution = detailParts[1]?.trim() || ''
-  
-  return [
-    {
-      type: errorType,
-      message: message,
-      solution: solution
-    }
-  ]
-}
 
 function StatCard({ icon: Icon, label, value, sub, color }) {
   return (
@@ -190,41 +170,22 @@ export default function DashboardPage() {
             {recentNotifs.length === 0
               ? <div className="px-5 py-8 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>No SMS sent yet.</div>
               : recentNotifs.map(n => (
-                <div key={n.id} className="border rounded-lg p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{n.recipient}</p>
-                      <p className="text-xs truncate" style={{ color: 'var(--muted-foreground)' }}>{n.message}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <span className={
-                        n.status === 'sent' ? 'px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800' :
-                        n.status === 'failed' ? 'px-2 py-1 text-xs font-medium rounded bg-red-100 text-red-800' :
-                        'px-2 py-1 text-xs font-medium rounded bg-yellow-100 text-yellow-800'
-                      }>
-                        {n.status}
-                      </span>
-                      <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>{n.provider}</p>
-                    </div>
+                <div key={n.id} className="flex items-center gap-3 px-5 py-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>{n.recipient}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--muted-foreground)' }}>{n.message}</p>
+                    {n.error_message && (
+                      <p className="text-xs mt-0.5 truncate" style={{ color: '#dc2626' }}>{n.error_message}</p>
+                    )}
                   </div>
-                  
-                  {n.status === 'failed' && n.error_message && (
-                    <div className="bg-gray-50 rounded p-3 space-y-2">
-                      {getErrorDetails(n.error_message).map((detail, idx) => (
-                        <div key={idx} className="text-sm">
-                          {detail.type && (
-                            <div className="font-medium text-gray-900">{detail.type}</div>
-                          )}
-                          {detail.message && (
-                            <div className="text-gray-700">{detail.message}</div>
-                          )}
-                          {detail.solution && (
-                            <div className="text-blue-700 font-medium pt-1">{detail.solution}</div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <div className="text-right shrink-0">
+                    <span className={
+                      n.status === 'sent'    ? 'badge-green' :
+                      n.status === 'failed'  ? 'badge-red' :
+                      n.status === 'retrying'? 'badge-blue' : 'badge-yellow'
+                    }>{n.status}</span>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>{n.provider}</p>
+                  </div>
                 </div>
               ))}
           </div>
