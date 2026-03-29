@@ -41,7 +41,7 @@ class AfricasTalkingProvider(SMSProvider):
             import asyncio
             loop = asyncio.get_event_loop()
             kwargs = {"message": message, "recipients": [to]}
-            if settings.AT_SENDER_ID:
+            if settings.AT_SENDER_ID and settings.AT_SENDER_ID.strip():
                 kwargs["senderId"] = settings.AT_SENDER_ID
             response = await loop.run_in_executor(None, lambda: self._sms.send(**kwargs))
             recipients = response.get("SMSMessageData", {}).get("Recipients", [])
