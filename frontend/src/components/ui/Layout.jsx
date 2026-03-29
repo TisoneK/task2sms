@@ -8,6 +8,15 @@ import { useState } from 'react'
 import useAuthStore from '../../store/authStore'
 import ThemeToggle from './ThemeToggle'
 
+// Telegram paper-plane icon (matches official Telegram branding)
+function TelegramIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+    </svg>
+  )
+}
+
 const NAV = [
   { section: 'OVERVIEW' },
   { to: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard' },
@@ -16,7 +25,7 @@ const NAV = [
   { to: '/tasks',         icon: ListTodo,         label: 'Tasks' },
   { to: '/send-sms',      icon: Send,             label: 'Send SMS' },
   { to: '/whatsapp',      icon: MessageCircle,    label: 'WhatsApp' },
-  { to: '/telegram',      icon: Send,             label: 'Telegram' },
+  { to: '/telegram',      icon: TelegramIcon,     label: 'Telegram' },
   { to: '/email',         icon: Mail,             label: 'Email' },
   { to: '/notifications', icon: Bell,             label: 'History' },
   { section: 'INTEGRATIONS' },
@@ -35,7 +44,7 @@ function SidebarContent({ onNavClick }) {
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--sidebar)' }}>
-      {/* Logo */}
+      {/* Logo — matches favicon exactly */}
       <div className="flex items-center gap-2.5 px-4 py-[14px] shrink-0"
            style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
         <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
@@ -60,7 +69,7 @@ function SidebarContent({ onNavClick }) {
         })}
       </nav>
 
-      {/* Footer */}
+      {/* User footer */}
       <div className="px-2 py-3 shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
         <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg mb-1">
           <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
@@ -88,7 +97,7 @@ export default function Layout() {
 
   return (
     <>
-      {/* Modal portal target — outside overflow constraints */}
+      {/* Portal root — modals render here, outside overflow constraints */}
       <div id="modal-root" />
 
       <div className="flex h-screen" style={{ background: 'var(--background)' }}>
@@ -113,9 +122,9 @@ export default function Layout() {
           </div>
         )}
 
-        {/* Main */}
+        {/* Main content */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Mobile header */}
+          {/* Mobile top bar */}
           <header className="md:hidden flex items-center gap-3 px-4 py-3 shrink-0"
                   style={{ background: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
             <button onClick={() => setMobileOpen(true)}
@@ -131,7 +140,7 @@ export default function Layout() {
             </div>
           </header>
 
-          {/* Page content — overflow here, not on the outer shell */}
+          {/* Scrollable page content */}
           <main className="flex-1 overflow-y-auto p-4 md:p-7"
                 style={{ background: 'var(--background)' }}>
             <div className="animate-fade-in">

@@ -3,6 +3,11 @@ import { tasksApi, notificationsApi } from '../services/api'
 import api from '../services/api'
 import toast from 'react-hot-toast'
 
+// Deduplicated error toast — same message never shows more than once at a time
+function toastError(message) {
+  toast.error(message, { id: message })
+}
+
 export function useStats() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -13,7 +18,7 @@ export function useStats() {
       const { data } = await api.get('/stats')
       setStats(data)
     } catch {
-      toast.error('Failed to load stats')
+      toastError('Failed to load stats')
     } finally {
       setLoading(false)
     }
@@ -39,7 +44,7 @@ export function useTasks(initialPage = 1, perPage = 20) {
       setTotal(data.total)
       setPage(p)
     } catch {
-      toast.error('Failed to load tasks')
+      toastError('Failed to load tasks')
     } finally {
       setLoading(false)
     }
@@ -80,7 +85,7 @@ export function useNotifications(initialPage = 1, perPage = 50) {
       setTotal(data.total)
       setPage(p)
     } catch {
-      toast.error('Failed to load notifications')
+      toastError('Failed to load notifications')
     } finally {
       setLoading(false)
     }

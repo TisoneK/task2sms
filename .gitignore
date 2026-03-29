@@ -1,9 +1,8 @@
+# Environment — actual secrets only, NOT the example template
 .env
-.env.example
 *.db
 *.sqlite3
 data/
-.DS_Store
 
 # Python
 __pycache__/
@@ -54,4 +53,14 @@ build/
 logs/
 
 # OS
+.DS_Store
 Thumbs.db
+
+# Test artefacts
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Playwright browser binaries (large, downloaded on first run)
+playwright/

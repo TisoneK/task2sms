@@ -6,15 +6,36 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # Database
       - DATABASE_URL=sqlite+aiosqlite:///./task2sms.db
+      # App
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - DEBUG=${DEBUG:-false}
+      # SMS
       - DEFAULT_SMS_PROVIDER=${DEFAULT_SMS_PROVIDER:-africastalking}
       - AT_USERNAME=${AT_USERNAME:-sandbox}
       - AT_API_KEY=${AT_API_KEY:-}
       - AT_SENDER_ID=${AT_SENDER_ID:-}
+      # Twilio (SMS + WhatsApp)
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
       - TWILIO_FROM_NUMBER=${TWILIO_FROM_NUMBER:-}
-      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      # WhatsApp
+      - WHATSAPP_PROVIDER=${WHATSAPP_PROVIDER:-twilio}
+      - WHATSAPP_FROM=${WHATSAPP_FROM:-whatsapp:+14155238886}
+      # Telegram
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_DEFAULT_PARSE_MODE=${TELEGRAM_DEFAULT_PARSE_MODE:-HTML}
+      # Email / SMTP
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-noreply@task2sms.com}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-Task2SMS}
+      # Webhooks
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-change-me-webhook-secret}
+      # CORS
       - FRONTEND_URL=http://localhost:5173
     volumes:
       - ./data:/app/data
