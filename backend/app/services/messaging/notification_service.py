@@ -3,7 +3,7 @@ from sqlalchemy import select, func
 from datetime import datetime, timezone, timedelta
 from typing import List
 from app.models.notification import Notification, NotificationStatus
-from app.services.sms_service import get_provider
+from app.services.messaging.sms_service import get_provider
 import logging
 
 logger = logging.getLogger(__name__)

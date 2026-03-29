@@ -36,13 +36,13 @@ function SidebarContent({ onNavClick }) {
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--sidebar)' }}>
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 py-4 border-b"
-           style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+      <div className="flex items-center gap-2.5 px-4 py-[14px] shrink-0"
+           style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
              style={{ background: 'var(--primary)' }}>
-          <MessageSquare size={15} className="text-white" />
+          <MessageSquare size={14} className="text-white" />
         </div>
-        <span className="font-semibold text-white text-[15px] tracking-tight">Task2SMS</span>
+        <span className="font-semibold text-white text-[14px] tracking-tight">Task2SMS</span>
       </div>
 
       {/* Nav */}
@@ -53,7 +53,7 @@ function SidebarContent({ onNavClick }) {
           return (
             <NavLink key={to} to={to} onClick={onNavClick}
               className={({ isActive }) => `sidebar-nav-item${isActive ? ' active' : ''}`}>
-              <Icon size={15} />
+              <Icon size={14} />
               <span>{label}</span>
             </NavLink>
           )
@@ -61,7 +61,7 @@ function SidebarContent({ onNavClick }) {
       </nav>
 
       {/* Footer */}
-      <div className="px-2 py-3 border-t" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+      <div className="px-2 py-3 shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
         <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg mb-1">
           <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold
                           text-white shrink-0" style={{ background: 'var(--primary)' }}>
@@ -69,12 +69,13 @@ function SidebarContent({ onNavClick }) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-[13px] font-medium text-white truncate leading-tight">{user?.username}</p>
-            <p className="text-xs truncate leading-tight" style={{ color: 'var(--sidebar-muted)' }}>{user?.email}</p>
+            <p className="text-[11px] truncate leading-tight" style={{ color: 'var(--sidebar-muted)' }}>
+              {user?.email}
+            </p>
           </div>
           <ThemeToggle />
         </div>
-        <button onClick={() => { logout(); navigate('/login') }}
-          className="sidebar-nav-item w-full">
+        <button onClick={() => { logout(); navigate('/login') }} className="sidebar-nav-item w-full">
           <LogOut size={14} /><span>Sign out</span>
         </button>
       </div>
@@ -83,55 +84,62 @@ function SidebarContent({ onNavClick }) {
 }
 
 export default function Layout() {
-  const [open, setOpen] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--background)' }}>
-      {/* Desktop sidebar */}
-      <aside className="hidden md:flex flex-col w-[216px] shrink-0">
-        <SidebarContent />
-      </aside>
+    <>
+      {/* Modal portal target — outside overflow constraints */}
+      <div id="modal-root" />
 
-      {/* Mobile drawer */}
-      {open && (
-        <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-               onClick={() => setOpen(false)} />
-          <aside className="relative z-50 flex flex-col w-[216px] h-full shadow-xl">
-            <button onClick={() => setOpen(false)}
-              className="absolute top-3 right-3 z-10 w-7 h-7 rounded-full flex items-center
-                         justify-center text-white hover:bg-white/10 transition-colors">
-              <X size={14} />
-            </button>
-            <SidebarContent onNavClick={() => setOpen(false)} />
-          </aside>
-        </div>
-      )}
+      <div className="flex h-screen" style={{ background: 'var(--background)' }}>
+        {/* Desktop sidebar */}
+        <aside className="hidden md:flex flex-col w-[216px] shrink-0 overflow-hidden">
+          <SidebarContent />
+        </aside>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Mobile header */}
-        <header className="md:hidden flex items-center gap-3 px-4 py-3 border-b"
-                style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-          <button onClick={() => setOpen(true)}
-            className="p-1.5 rounded-lg transition-colors"
-            style={{ color: 'var(--muted-foreground)' }}>
-            <Menu size={20} />
-          </button>
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md flex items-center justify-center"
-                 style={{ background: 'var(--primary)' }}>
-              <MessageSquare size={12} className="text-white" />
-            </div>
-            <span className="font-semibold text-[14px]" style={{ color: 'var(--foreground)' }}>Task2SMS</span>
+        {/* Mobile drawer */}
+        {mobileOpen && (
+          <div className="fixed inset-0 z-50 md:hidden">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                 onClick={() => setMobileOpen(false)} />
+            <aside className="relative z-50 flex flex-col w-[216px] h-full shadow-xl">
+              <button onClick={() => setMobileOpen(false)}
+                className="absolute top-3 right-3 z-10 w-7 h-7 rounded-full flex items-center
+                           justify-center text-white hover:bg-white/10 transition-colors">
+                <X size={14} />
+              </button>
+              <SidebarContent onNavClick={() => setMobileOpen(false)} />
+            </aside>
           </div>
-        </header>
+        )}
 
-        <main className="flex-1 overflow-auto p-4 md:p-7 animate-fade-in"
-              style={{ background: 'var(--background)' }}>
-          <Outlet />
-        </main>
+        {/* Main */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Mobile header */}
+          <header className="md:hidden flex items-center gap-3 px-4 py-3 shrink-0"
+                  style={{ background: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
+            <button onClick={() => setMobileOpen(true)}
+              className="p-1.5 rounded-lg" style={{ color: 'var(--muted-foreground)' }}>
+              <Menu size={20} />
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md flex items-center justify-center"
+                   style={{ background: 'var(--primary)' }}>
+                <MessageSquare size={12} className="text-white" />
+              </div>
+              <span className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>Task2SMS</span>
+            </div>
+          </header>
+
+          {/* Page content — overflow here, not on the outer shell */}
+          <main className="flex-1 overflow-y-auto p-4 md:p-7"
+                style={{ background: 'var(--background)' }}>
+            <div className="animate-fade-in">
+              <Outlet />
+            </div>
+          </main>
+        </div>
       </div>
-    </div>
+    </>
   )
 }

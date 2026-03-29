@@ -31,6 +31,17 @@ async def get_db():
 
 
 async def create_tables():
+    """Import every model so SQLAlchemy registers them, then create all tables."""
     async with engine.begin() as conn:
-        from app.models import user, task, notification  # noqa
+        # Import all models to register with metadata
+        import app.models.user          # noqa
+        import app.models.task          # noqa
+        import app.models.notification  # noqa
+        import app.models.organization  # noqa
+        import app.models.webhook       # noqa
+        import app.models.datasource    # noqa
+        import app.models.email_notification  # noqa
+        import app.models.whatsapp      # noqa
+        import app.models.telegram      # noqa
+        import app.models.scraper       # noqa
         await conn.run_sync(Base.metadata.create_all)

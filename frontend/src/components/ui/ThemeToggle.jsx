@@ -1,45 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import useThemeStore from '../../store/themeStore'
 
-const ThemeToggle = () => {
-  const [theme, setTheme] = useState('light');
-
-  useEffect(() => {
-    // Check for saved theme preference or default to light
-    const savedTheme = localStorage.getItem('theme') || 'light';
-    setTheme(savedTheme);
-    document.documentElement.setAttribute('data-theme', savedTheme);
-  }, []);
-
-  const toggleTheme = () => {
-    const newTheme = theme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('theme', newTheme);
-  };
+export default function ThemeToggle({ className = '' }) {
+  const { theme, toggleTheme } = useThemeStore()
+  const isDark = theme === 'dark'
 
   return (
     <button
       onClick={toggleTheme}
-      className="p-2 rounded-lg transition-colors"
-      style={{ 
-        backgroundColor: 'transparent',
-        color: 'var(--muted-foreground)'
-      }}
-      onMouseEnter={(e) => e.target.style.backgroundColor = 'var(--muted)'}
-      onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-      aria-label="Toggle theme"
+      className={`p-1.5 rounded-lg transition-colors ${className}`}
+      style={{ color: 'var(--muted-foreground)' }}
+      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.08)'}
+      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={isDark ? 'Light mode' : 'Dark mode'}
     >
-      {theme === 'light' ? (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+      {isDark ? (
+        /* Sun icon */
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
         </svg>
       ) : (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+        /* Moon icon */
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
         </svg>
       )}
     </button>
-  );
-};
-
-export default ThemeToggle;
+  )
+}

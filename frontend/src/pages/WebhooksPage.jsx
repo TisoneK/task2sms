@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { webhooksApi } from '../services/api'
 import { Plus, Trash2, ToggleRight, ToggleLeft, ChevronDown, ChevronUp, X, Zap } from 'lucide-react'
 import ConfirmModal from '../components/ui/ConfirmModal'
@@ -9,13 +10,18 @@ const EVENT_LABELS = {
   'sms.sent':'SMS Sent','sms.failed':'SMS Failed','task.run':'Task Run',
   'task.failed':'Task Failed','email.sent':'Email Sent','whatsapp.sent':'WhatsApp Sent',
 }
+const PORTAL = () => document.getElementById('modal-root') || document.body
 
-function Modal({ onClose, onSave, initial }) {
+function WebhookModal({ onClose, onSave, initial }) {
   const [form, setForm] = useState(initial || { name:'', url:'', secret:'', events:[], is_active:true })
   const [allEvents, setAllEvents] = useState(Object.keys(EVENT_LABELS))
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => { webhooksApi.eventTypes().then(({ data }) => setAllEvents(data.events)).catch(() => {}) }, [])
+  useEffect(() => {
+    webhooksApi.eventTypes().then(({ data }) => setAllEvents(data.events)).catch(() => {})
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [])
 
   const toggleEvent = e => setForm(f => ({
     ...f, events: f.events.includes(e) ? f.events.filter(x => x !== e) : [...f.events, e]
@@ -30,51 +36,54 @@ function Modal({ onClose, onSave, initial }) {
     finally { setLoading(false) }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative rounded-2xl w-full max-w-md p-6 space-y-4 animate-fade-in"
-           style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-modal)' }}>
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold" style={{ color: 'var(--foreground)' }}>
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+         style={{ background: 'rgba(0,0,0,0.55)' }}
+         onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="relative rounded-2xl w-full max-w-md animate-fade-in"
+           style={{ background:'var(--card)', border:'1px solid var(--border)', boxShadow:'var(--shadow-modal)' }}
+           onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4"
+             style={{ borderBottom:'1px solid var(--border)' }}>
+          <h3 className="font-semibold text-[15px]" style={{ color:'var(--foreground)' }}>
             {initial ? 'Edit Webhook' : 'New Webhook'}
           </h3>
           <button onClick={onClose} className="btn-ghost p-1.5"><X size={16} /></button>
         </div>
-        <form onSubmit={submit} className="space-y-4">
+        <form onSubmit={submit} className="p-6 space-y-4">
           <div><label className="label">Name</label>
             <input className="input" required value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="My Webhook" /></div>
           <div><label className="label">Endpoint URL</label>
             <input className="input font-mono text-sm" required type="url" value={form.url}
               onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="https://example.com/webhook" /></div>
-          <div><label className="label">Secret (HMAC)</label>
+          <div><label className="label">Secret (HMAC — optional)</label>
             <input className="input font-mono text-sm" value={form.secret}
-              onChange={e => setForm(f => ({ ...f, secret: e.target.value }))} placeholder="optional-secret" /></div>
+              onChange={e => setForm(f => ({ ...f, secret: e.target.value }))} placeholder="your-secret" /></div>
           <div>
             <label className="label">Events *</label>
             <div className="grid grid-cols-2 gap-2 mt-1">
               {allEvents.map(e => (
-                <label key={e} onClick={() => toggleEvent(e)}
-                  className="flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors text-sm"
+                <button type="button" key={e} onClick={() => toggleEvent(e)}
+                  className="flex items-center gap-2 p-2.5 rounded-lg border text-left text-sm transition-colors"
                   style={{
                     borderColor: form.events.includes(e) ? 'var(--primary)' : 'var(--border)',
-                    background: form.events.includes(e) ? 'var(--accent)' : 'transparent',
-                    color: form.events.includes(e) ? 'var(--accent-foreground)' : 'var(--foreground)',
+                    background: form.events.includes(e) ? 'color-mix(in srgb, var(--primary) 8%, transparent)' : 'transparent',
+                    color: form.events.includes(e) ? 'var(--primary)' : 'var(--foreground)',
                   }}>
-                  <div className="w-4 h-4 rounded border flex items-center justify-center shrink-0"
+                  <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
                        style={{
                          background: form.events.includes(e) ? 'var(--primary)' : 'transparent',
-                         borderColor: form.events.includes(e) ? 'var(--primary)' : 'var(--border)',
+                         border: form.events.includes(e) ? 'none' : '1px solid var(--border)',
                        }}>
-                    {form.events.includes(e) && <span className="text-white text-xs leading-none">✓</span>}
+                    {form.events.includes(e) && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>}
                   </div>
                   {EVENT_LABELS[e] || e}
-                </label>
+                </button>
               ))}
             </div>
           </div>
-          <div className="flex gap-3 pt-1">
+          <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="btn-secondary flex-1 justify-center">Cancel</button>
             <button type="submit" disabled={loading} className="btn-primary flex-1 justify-center">
               {loading ? 'Saving…' : initial ? 'Update' : 'Create'}
@@ -82,7 +91,8 @@ function Modal({ onClose, onSave, initial }) {
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    PORTAL()
   )
 }
 
@@ -93,23 +103,23 @@ function DeliveriesDrawer({ webhookId }) {
     webhooksApi.deliveries(webhookId).then(({ data }) => setDeliveries(data)).finally(() => setLoading(false))
   }, [webhookId])
   return (
-    <div className="border-t" style={{ borderColor: 'var(--border)' }}>
-      <div className="px-5 py-2.5" style={{ background: 'var(--muted)' }}>
-        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+    <div style={{ borderTop:'1px solid var(--border)' }}>
+      <div className="px-5 py-2.5" style={{ background:'var(--muted)' }}>
+        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color:'var(--muted-foreground)' }}>
           Recent Deliveries
         </p>
       </div>
       {loading ? <div className="flex justify-center py-6"><div className="spinner-sm" /></div>
        : deliveries.length === 0
-       ? <p className="text-sm text-center py-6" style={{ color: 'var(--muted-foreground)' }}>No deliveries yet</p>
+       ? <p className="text-sm text-center py-6" style={{ color:'var(--muted-foreground)' }}>No deliveries yet</p>
        : deliveries.slice(0, 10).map(d => (
-         <div key={d.id} className="flex items-center gap-3 px-5 py-2.5 text-sm border-t"
-              style={{ borderColor: 'var(--border)' }}>
+         <div key={d.id} className="flex items-center gap-3 px-5 py-2.5 text-sm"
+              style={{ borderTop:'1px solid var(--border)' }}>
            <span className={d.status === 'delivered' ? 'badge-green' : 'badge-red'}>{d.status}</span>
-           <span style={{ color: 'var(--muted-foreground)' }}>{EVENT_LABELS[d.event] || d.event}</span>
-           {d.response_status && <span className="font-mono text-xs" style={{ color: 'var(--muted-foreground)' }}>{d.response_status}</span>}
-           {d.error && <span className="text-xs truncate flex-1" style={{ color: 'var(--destructive)' }}>{d.error}</span>}
-           <span className="text-xs ml-auto shrink-0" style={{ color: 'var(--muted-foreground)' }}>
+           <span style={{ color:'var(--muted-foreground)' }}>{EVENT_LABELS[d.event] || d.event}</span>
+           {d.response_status && <span className="font-mono text-xs" style={{ color:'var(--muted-foreground)' }}>{d.response_status}</span>}
+           {d.error && <span className="text-xs truncate flex-1" style={{ color:'var(--destructive)' }}>{d.error}</span>}
+           <span className="text-xs ml-auto shrink-0" style={{ color:'var(--muted-foreground)' }}>
              {d.created_at ? new Date(d.created_at).toLocaleTimeString() : ''}
            </span>
          </div>
@@ -163,7 +173,7 @@ export default function WebhooksPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Webhooks</h1>
-          <p className="page-subtitle">HTTP callbacks for every event</p>
+          <p className="page-subtitle">HTTP callbacks fired on every event</p>
         </div>
         <button onClick={() => { setEditing(null); setShowModal(true) }} className="btn-primary">
           <Plus size={15} /> New Webhook
@@ -172,26 +182,27 @@ export default function WebhooksPage() {
 
       {loading ? <div className="flex justify-center py-20"><div className="spinner-lg" /></div>
        : webhooks.length === 0 ? (
-         <div className="card">
-           <EmptyState icon={Zap} title="No webhooks yet"
-             description="Get notified via HTTP on every event"
-             action={<button onClick={() => setShowModal(true)} className="btn-primary inline-flex"><Plus size={14} /> Create webhook</button>} />
-         </div>
+        <div className="card">
+          <EmptyState icon={Zap} title="No webhooks yet"
+            description="Get HTTP callbacks on every SMS, task, and email event"
+            action={<button onClick={() => setShowModal(true)} className="btn-primary inline-flex"><Plus size={14} /> Create webhook</button>} />
+        </div>
        ) : (
-        <div className="card divide-y" style={{ borderColor: 'var(--border)' }}>
+        <div className="card divide-y" style={{ borderColor:'var(--border)' }}>
           {webhooks.map(wh => (
             <div key={wh.id}>
               <div className="flex items-start gap-4 px-5 py-4 transition-colors"
+                   style={{ cursor:'default' }}
                    onMouseEnter={e => e.currentTarget.style.background = 'var(--muted)'}
                    onMouseLeave={e => e.currentTarget.style.background = ''}>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>{wh.name}</p>
+                    <p className="font-semibold text-sm" style={{ color:'var(--foreground)' }}>{wh.name}</p>
                     <span className={wh.is_active ? 'badge-green' : 'badge-gray'}>
                       {wh.is_active ? 'active' : 'disabled'}
                     </span>
                   </div>
-                  <p className="text-xs font-mono mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>{wh.url}</p>
+                  <p className="text-xs font-mono mt-0.5 truncate" style={{ color:'var(--muted-foreground)' }}>{wh.url}</p>
                   <div className="flex gap-1 flex-wrap mt-1.5">
                     {(wh.events || []).map(e => (
                       <span key={e} className="badge-gray text-xs">{EVENT_LABELS[e] || e}</span>
@@ -205,14 +216,15 @@ export default function WebhooksPage() {
                   </button>
                   <button onClick={() => handleToggle(wh)} className="btn-ghost p-2">
                     {wh.is_active
-                      ? <ToggleRight size={16} style={{ color: '#16a34a' }} />
-                      : <ToggleLeft size={16} style={{ color: 'var(--muted-foreground)' }} />}
+                      ? <ToggleRight size={17} style={{ color:'#16a34a' }} />
+                      : <ToggleLeft size={17} style={{ color:'var(--muted-foreground)' }} />}
                   </button>
-                  <button onClick={() => { setEditing(wh); setShowModal(true) }} className="btn-ghost p-2">
-                    <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Edit</span>
+                  <button onClick={() => { setEditing(wh); setShowModal(true) }}
+                    className="btn-ghost px-2.5 py-1.5 text-xs" style={{ color:'var(--muted-foreground)' }}>
+                    Edit
                   </button>
                   <button onClick={() => setConfirmDelete(wh)}
-                    className="btn-ghost p-2" style={{ color: 'var(--destructive)' }}>
+                    className="btn-ghost p-2" style={{ color:'var(--destructive)' }}>
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -224,9 +236,11 @@ export default function WebhooksPage() {
        )}
 
       {showModal && (
-        <Modal initial={editing}
+        <WebhookModal
+          initial={editing}
           onClose={() => { setShowModal(false); setEditing(null) }}
-          onSave={handleSave} />
+          onSave={handleSave}
+        />
       )}
       <ConfirmModal open={!!confirmDelete} title="Delete webhook?"
         message={`"${confirmDelete?.name}" will be permanently deleted.`}
