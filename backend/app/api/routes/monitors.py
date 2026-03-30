@@ -155,6 +155,7 @@ async def monitor_logs(mid: int, limit: int = 50,
     if not m: raise HTTPException(404, "Monitor not found")
     logs = await get_check_logs(db, mid, limit)
     return [{
-        "id": l.id, "value_found": l.value_found, "condition_met": l.condition_met,
+        "id": l.id, "value_found": l.value_found, "prev_value": getattr(l, "prev_value", None),
+        "condition_met": l.condition_met,
         "alerted": l.alerted, "error": l.error, "checked_at": l.checked_at,
     } for l in logs]

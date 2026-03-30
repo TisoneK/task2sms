@@ -174,10 +174,21 @@ function MonitorModal({ onClose, onSave, initial }) {
               <input className="input text-sm" value={recipientInput} onChange={e => setRecipientInput(e.target.value)}
                 placeholder="+254712345678, user@email.com, 123456789" /></div>
             <div><label className="label">Message Template</label>
-              <textarea className="input resize-none text-sm" rows={2} value={form.message_template} onChange={set('message_template')} />
+              <textarea className="input resize-none text-sm font-mono" rows={2} value={form.message_template} onChange={set('message_template')} />
               <p className="text-xs mt-1" style={{ color:'var(--muted-foreground)' }}>
                 Variables: <code className="font-mono">{'{name}'}</code> <code className="font-mono">{'{value}'}</code> <code className="font-mono">{'{prev_value}'}</code> <code className="font-mono">{'{url}'}</code>
               </p>
+              {form.message_template && (
+                <div className="mt-2 rounded-lg px-3 py-2 text-xs" style={{ background:'var(--muted)', border:'1px solid var(--border)', color:'var(--foreground)' }}>
+                  <span className="font-semibold uppercase tracking-wide text-[10px]" style={{ color:'var(--muted-foreground)' }}>Preview: </span>
+                  {form.message_template
+                    .replace(/\{name\}/g, form.name || 'My Monitor')
+                    .replace(/\{value\}/g, '129.67')
+                    .replace(/\{prev_value\}/g, '130.12')
+                    .replace(/\{url\}/g, form.url || 'https://example.com')
+                    .replace(/\{selector\}/g, form.selector || 'input')}
+                </div>
+              )}
             </div>
             <div><label className="label">Check Interval (minutes)</label>
               <input className="input" type="number" min={1} max={10080} value={form.check_interval_minutes}
@@ -221,16 +232,21 @@ function LogDrawer({ monitorId }) {
                   ? <CheckCircle2 size={13} className="text-emerald-500 shrink-0 mt-0.5" />
                   : <Clock size={13} className="shrink-0 mt-0.5" style={{ color:'var(--muted-foreground)' }} />}
               <div className="flex-1 min-w-0">
-                {l.value_found !== null && (
+                {l.value_found !== null && l.value_found !== undefined ? (
                   <p className="font-mono text-xs truncate" style={{ color:'var(--foreground)' }}>
-                    value: <span className="font-semibold">{l.value_found}</span>
+                    value: <span className="font-semibold">{l.value_found === '' ? <span style={{ color:'var(--muted-foreground)', fontStyle:'italic' }}>empty</span> : l.value_found}</span>
+                    {l.prev_value !== null && l.prev_value !== undefined && l.prev_value !== l.value_found && (
+                      <span style={{ color:'var(--muted-foreground)' }}> (was: {l.prev_value})</span>
+                    )}
                   </p>
+                ) : (
+                  <p className="font-mono text-xs" style={{ color:'var(--muted-foreground)', fontStyle:'italic' }}>no value extracted</p>
                 )}
                 {l.error && <p className="text-xs" style={{ color:'var(--destructive)' }}>{l.error}</p>}
                 {l.alerted && <span className="badge-blue text-xs ml-1">alerted</span>}
               </div>
               <p className="text-xs shrink-0" style={{ color:'var(--muted-foreground)' }}>
-                {formatDistanceToNow(new Date(l.checked_at), { addSuffix:true })}
+                {formatDistanceToNow(new Date(l.checked_at.endsWith('Z') ? l.checked_at : l.checked_at + 'Z'), { addSuffix:true })}
               </p>
             </div>
           ))}
@@ -347,10 +363,12 @@ export default function ScraperPage() {
                   <div className="flex items-center gap-3 mt-1 text-xs flex-wrap" style={{ color:'var(--muted-foreground)' }}>
                     <span>every {m.check_interval_minutes}m</span>
                     {m.last_checked_at && (
-                      <span>checked {formatDistanceToNow(new Date(m.last_checked_at), { addSuffix:true })}</span>
+                      <span>checked {formatDistanceToNow(new Date(m.last_checked_at.endsWith('Z') ? m.last_checked_at : m.last_checked_at + 'Z'), { addSuffix:true })}</span>
                     )}
                     {m.last_value !== null && m.last_value !== undefined && (
-                      <span>last: <span className="font-mono font-medium" style={{ color:'var(--foreground)' }}>"{m.last_value}"</span></span>
+                      <span>last: <span className="font-mono font-medium" style={{ color: m.last_value === '' ? 'var(--muted-foreground)' : 'var(--foreground)' }}>
+                        {m.last_value === '' ? <em>empty</em> : `"${m.last_value}"`}
+                      </span></span>
                     )}
                     {m.alert_count > 0 && (
                       <span style={{ color:'#d97706', fontWeight:600 }}>

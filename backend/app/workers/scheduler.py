@@ -77,8 +77,28 @@ def schedule_monitor(monitor: ScraperMonitor):
         return
     mins = max(monitor.check_interval_minutes or 60, 1)
     trigger = IntervalTrigger(minutes=mins)
-    scheduler.add_job(_run_monitor, trigger, args=[monitor.id], id=job_id, replace_existing=True)
-    logger.info(f"Scheduled monitor {monitor.id} ({monitor.name}) every {mins}m")
+
+    # If we have a recent check, delay the next run so it respects the interval
+    from datetime import timedelta
+    next_run = None
+    if monitor.last_checked_at:
+        due_at = monitor.last_checked_at + timedelta(minutes=mins)
+        now = datetime.now(timezone.utc)
+        
+        # Ensure due_at is timezone-aware
+        if due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=timezone.utc)
+        
+        if due_at > now:
+            next_run = due_at
+
+    scheduler.add_job(
+        _run_monitor, trigger, args=[monitor.id], id=job_id,
+        replace_existing=True,
+        next_run_time=next_run,
+    )
+    logger.info(f"Scheduled monitor {monitor.id} ({monitor.name}) every {mins}m"
+                + (f", next run at {next_run}" if next_run else ""))
 
 
 def unschedule_monitor(monitor_id: int):

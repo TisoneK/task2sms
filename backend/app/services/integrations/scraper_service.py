@@ -8,7 +8,6 @@ Dynamic mode is activated when:
 """
 import httpx
 import re
-import asyncio
 from typing import Optional
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone
@@ -40,8 +39,14 @@ async def _fetch_static(url: str, user_agent: Optional[str] = None,
 
 async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
                           wait_selector: Optional[str] = None,
-                          wait_ms: int = 2000) -> str:
-    """Use Playwright headless Chromium for JS-rendered pages."""
+                          wait_ms: int = 3000) -> str:
+    """Use Playwright headless Chromium for JS-rendered pages.
+
+    After the page settles, we inject all live JS input/select/textarea .value
+    properties back into the DOM as 'value' attributes so BeautifulSoup can
+    read them — React and Vue control input values via JS properties, not HTML
+    attributes, so page.content() alone would always return empty inputs.
+    """
     try:
         from playwright.async_api import async_playwright
     except ImportError:
@@ -72,19 +77,58 @@ async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
         else:
             await page.wait_for_timeout(wait_ms)
 
+        # Stamp live JS .value back onto HTML attributes so BS4 can see them.
+        # React/Vue control inputs via JS properties; page.content() misses them.
+        await page.evaluate("""() => {
+            document.querySelectorAll('input, select, textarea').forEach(el => {
+                if (el.value !== undefined && el.value !== '') {
+                    el.setAttribute('value', el.value);
+                }
+            });
+        }""")
+
         html = await page.content()
         await browser.close()
         return html
 
 
 def _should_use_playwright(html: str, url: str) -> bool:
-    """Heuristic: if body text is very short, page is likely JS-rendered."""
+    """Heuristic: detect JS-rendered pages that need Playwright.
+
+    Checks for React/Vue/Angular/Svelte framework fingerprints AND short body
+    text. Both must be true to avoid false-positives on legitimate short static
+    pages (e.g. a minimal landing page or a plain API response page).
+    """
     soup = BeautifulSoup(html, "lxml")
     body = soup.body
     if body is None:
         return True
+
     text = body.get_text(strip=True)
-    return len(text) < 200
+    if len(text) >= 500:
+        # Enough content rendered — static fetch was sufficient
+        return False
+
+    # Short body: check for JS framework signals before assuming JS-rendered
+    js_signals = [
+        'id="root"', "id='root'",          # React / Vue
+        'id="app"', "id='app'",             # Vue
+        'id="__next"', "id='__next'",       # Next.js
+        'id="__nuxt"', "id='__nuxt'",       # Nuxt.js
+        "ng-version=",                       # Angular
+        "data-reactroot",                    # React SSR marker
+        "__svelte",                          # Svelte
+        "window.__INITIAL_STATE__",          # generic SSR hydration
+        "window.__NUXT__",
+        "window.__NEXT_DATA__",
+    ]
+    html_lower = html[:8000]  # only scan the head/early body
+    if any(sig in html_lower for sig in js_signals):
+        logger.debug(f"JS framework fingerprint detected — will use Playwright")
+        return True
+
+    # Short body but no framework signals — probably just a short static page
+    return False
 
 
 async def fetch_page(monitor: ScraperMonitor) -> str:
@@ -96,7 +140,7 @@ async def fetch_page(monitor: ScraperMonitor) -> str:
             monitor.url,
             user_agent=monitor.user_agent,
             wait_selector=monitor.wait_selector if hasattr(monitor, "wait_selector") else None,
-            wait_ms=getattr(monitor, "wait_ms", 2000),
+            wait_ms=getattr(monitor, "wait_ms", 3000),
         )
 
     # Static fetch first
@@ -106,7 +150,12 @@ async def fetch_page(monitor: ScraperMonitor) -> str:
     if _should_use_playwright(html, monitor.url):
         logger.info(f"Monitor {monitor.id}: static body too short — retrying with Playwright")
         try:
-            html = await _fetch_dynamic(monitor.url, monitor.user_agent)
+            # Use a longer default wait for auto-detected JS pages
+            html = await _fetch_dynamic(
+                monitor.url,
+                monitor.user_agent,
+                wait_ms=3000,
+            )
         except Exception as e:
             logger.warning(f"Playwright fallback failed: {e} — using static HTML")
 
@@ -126,6 +175,11 @@ def _extract(html: str, selector_type: SelectorType,
         el = els[0]
         if attribute and attribute not in ("text", "innerText"):
             return el.get(attribute)
+        # For form elements, text content is empty — read the value attribute instead
+        if el.name in ("input", "select", "textarea") and not attribute:
+            val = el.get("value")
+            if val is not None:
+                return val.strip()
         return el.get_text(strip=True)
 
     elif selector_type == SelectorType.XPATH:
@@ -193,14 +247,19 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
         value = _extract(html, monitor.selector_type, monitor.selector, monitor.attribute)
         log.value_found = value
 
+        prev_value = monitor.last_value  # capture before mutation
+
         if monitor.condition_operator == "changed":
-            condition_met = (
-                monitor.last_value is not None and value != monitor.last_value
-            )
+            # First run: just baseline — never alert on the very first check
+            if prev_value is None:
+                condition_met = False
+            else:
+                condition_met = value != prev_value
         else:
             condition_met = _check_condition(value, monitor.condition_operator, monitor.condition_value)
 
         log.condition_met = condition_met
+        log.prev_value = prev_value  # store for context
         monitor.last_checked_at = datetime.now(timezone.utc)
         monitor.last_value = value
         monitor.error_message = None
@@ -226,9 +285,9 @@ async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
     context = {
         "name": monitor.name,
         "url": monitor.url,
-        "value": log.value_found or "N/A",
+        "value": log.value_found if log.value_found is not None else "N/A",
         "selector": monitor.selector,
-        "prev_value": monitor.last_value or "N/A",
+        "prev_value": (getattr(log, "prev_value", None) or "N/A"),
     }
     try:
         message = monitor.message_template.format(**context)

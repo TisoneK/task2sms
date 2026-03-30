@@ -69,6 +69,7 @@ class ScraperCheckLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     monitor_id = Column(Integer, ForeignKey("scraper_monitors.id"), nullable=False)
     value_found = Column(Text, nullable=True)
+    prev_value = Column(Text, nullable=True)
     condition_met = Column(Boolean, nullable=True)
     alerted = Column(Boolean, default=False)
     error = Column(Text, nullable=True)
