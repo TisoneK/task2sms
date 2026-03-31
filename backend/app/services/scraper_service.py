@@ -3,5 +3,5 @@ from app.services.integrations.scraper_service import *  # noqa
 from app.services.integrations.scraper_service import (
     check_monitor, run_monitor_and_notify,
     get_monitors, get_monitor, get_check_logs,
-    fetch_page,
+    fetch_page, delete_check_log, clear_check_logs,
 )

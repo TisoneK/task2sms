@@ -84,26 +84,35 @@ export default function TelegramPage() {
 
       {/* Bot status banner */}
       {botInfo && (
-        <div className={`rounded-xl px-4 py-3 flex items-center gap-3 text-sm border ${
-          botInfo.ok
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : 'bg-amber-50 border-amber-200 text-amber-800'
-        }`}>
-          <div className={`w-2 h-2 rounded-full shrink-0 ${botInfo.ok ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+        <div className="rounded-xl px-4 py-3 flex items-center gap-3 text-sm"
+          style={botInfo.ok
+            ? { background: 'color-mix(in srgb, #10b981 14%, var(--card))', border: '1px solid #10b981', color: 'var(--foreground)' }
+            : { background: 'color-mix(in srgb, #f59e0b 14%, var(--card))', border: '1px solid #d97706', color: 'var(--foreground)' }
+          }>
+          <div className="w-2 h-2 rounded-full shrink-0"
+            style={{ background: botInfo.ok ? '#10b981' : '#f59e0b' }} />
           {botInfo.ok
             ? <>Bot connected: <strong className="font-semibold">@{botInfo.result?.username}</strong></>
-            : <>Bot not configured — set <code className="font-mono text-xs bg-amber-100 px-1.5 py-0.5 rounded">TELEGRAM_BOT_TOKEN</code> in your .env</>
+            : <>Bot not configured — set <code className="font-mono text-xs px-1.5 py-0.5 rounded"
+                style={{ background: 'var(--muted)' }}>TELEGRAM_BOT_TOKEN</code> in your .env</>
           }
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-muted p-1 rounded-lg w-fit">
+      {/* ── Tabs ── themed for dark mode ── */}
+      <div className="flex gap-0" style={{ borderBottom: '2px solid var(--border)' }}>
         {['send', 'history'].map(t => (
-          <button key={t} onClick={() => handleTabChange(t)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium capitalize transition-colors ${
-              tab === t ? 'bg-white text-foreground shadow-sm' : ' hover:text-foreground'
-            }`}>{t}</button>
+          <button
+            key={t}
+            onClick={() => handleTabChange(t)}
+            className="px-5 py-2 text-sm font-semibold capitalize transition-colors relative"
+            style={{
+              color: tab === t ? 'var(--foreground)' : 'var(--muted-foreground)',
+              background: 'transparent',
+              borderBottom: tab === t ? `2px solid var(--primary)` : '2px solid transparent',
+              marginBottom: '-2px',
+            }}
+          >{t}</button>
         ))}
       </div>
 
@@ -111,7 +120,9 @@ export default function TelegramPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Recipients */}
           <div className="card p-5 space-y-4">
-            <h2 className="font-semibold text-foreground text-sm">Chat IDs / Usernames</h2>
+            <h2 className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>
+              Chat IDs / Usernames
+            </h2>
             {chatIds.map((id, i) => (
               <div key={i} className="flex gap-2">
                 <input className="input flex-1 font-mono text-sm" value={id}
@@ -119,7 +130,7 @@ export default function TelegramPage() {
                   placeholder="123456789 or @channelname" />
                 {chatIds.length > 1 && (
                   <button type="button" onClick={() => removeChatId(i)}
-                    className="btn-ghost p-2 text-red-400 hover:text-red-600 hover:bg-red-50">
+                    className="btn-ghost p-2" style={{ color: 'var(--destructive)' }}>
                     <X size={16} />
                   </button>
                 )}
@@ -128,7 +139,7 @@ export default function TelegramPage() {
             <button type="button" onClick={addChatId} className="btn-secondary text-sm">
               <Plus size={14} /> Add recipient
             </button>
-            <p className="text-xs text-muted">
+            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
               Use numeric chat IDs for users/groups. Use @username for public channels.
               Have the user send /start to your bot first.
             </p>
@@ -137,9 +148,12 @@ export default function TelegramPage() {
           {/* Message */}
           <div className="card p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-foreground text-sm">Message</h2>
-              <select className="text-xs border border-card rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                value={parseMode} onChange={e => setParseMode(e.target.value)}>
+              <h2 className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>Message</h2>
+              <select
+                className="input text-xs py-1 px-2 w-auto"
+                value={parseMode}
+                onChange={e => setParseMode(e.target.value)}
+              >
                 <option value="HTML">HTML</option>
                 <option value="Markdown">Markdown</option>
                 <option value="MarkdownV2">MarkdownV2</option>
@@ -153,15 +167,18 @@ export default function TelegramPage() {
                 : '*Bold*, _italic_, `code`'}
             />
             <div className="flex items-center justify-between">
-              <p className="text-xs text-muted">
-                {parseMode === 'HTML' ? 'Tags: <b> <i> <code> <pre> <a href="…">' : 'Use *bold* _italic_ `code` [link](url)'}
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                {parseMode === 'HTML'
+                  ? 'Tags: <b> <i> <code> <pre> <a href="…">'
+                  : 'Use *bold* _italic_ `code` [link](url)'}
               </p>
-              <p className="text-xs text-muted">{message.length}/4096</p>
+              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{message.length}/4096</p>
             </div>
           </div>
 
-          <button type="submit" disabled={loading} className="btn w-full justify-center text-white font-semibold"
-            style={{ background: loading ? '#93c5fd' : TELEGRAM_BLUE }}>
+          <button type="submit" disabled={loading}
+            className="btn w-full justify-center text-white font-semibold py-2.5 rounded-xl transition-opacity"
+            style={{ background: loading ? 'color-mix(in srgb, #229ED9 60%, transparent)' : TELEGRAM_BLUE }}>
             {loading
               ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Sending…</>
               : <><TelegramIcon size={16} /> Send via Telegram</>}
@@ -171,19 +188,19 @@ export default function TelegramPage() {
             <div className="card p-5 space-y-3 animate-fade-in">
               <div className="flex gap-6">
                 <div className="text-center">
-                  <p className="text-2xl font-bold text-emerald-600">{results.sent}</p>
-                  <p className="text-xs text-muted">Sent</p>
+                  <p className="text-2xl font-bold" style={{ color: "#10b981" }}>{results.sent}</p>
+                  <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Sent</p>
                 </div>
                 <div className="text-center">
-                  <p className="text-2xl font-bold text-red-500">{results.failed}</p>
-                  <p className="text-xs text-muted">Failed</p>
+                  <p className="text-2xl font-bold" style={{ color: 'var(--destructive)' }}>{results.failed}</p>
+                  <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Failed</p>
                 </div>
               </div>
               {results.results.map((r, i) => (
-                <div key={i} style={{ color: "var(--muted-foreground)" }}>
-                  <span className="font-mono text-foreground">{r.chat_id}</span>
+                <div key={i} className="flex items-center justify-between gap-3">
+                  <span className="font-mono text-sm" style={{ color: 'var(--foreground)' }}>{r.chat_id}</span>
                   <div className="flex items-center gap-2">
-                    {r.message_id && <span className="text-xs text-muted">#{r.message_id}</span>}
+                    {r.message_id && <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>#{r.message_id}</span>}
                     <span className={STATUS_COLORS[r.status?.value || r.status] || 'badge-gray'}>
                       {r.status?.value || r.status}
                     </span>
@@ -202,26 +219,39 @@ export default function TelegramPage() {
               <div className="w-8 h-8 spinner" />
             </div>
           ) : history.length === 0 ? (
-            <div className="card p-12 text-center text-muted text-sm">No messages sent yet.</div>
+            <div className="card p-12 text-center text-sm" style={{ color: 'var(--muted-foreground)' }}>
+              No messages sent yet.
+            </div>
           ) : (
             <>
-              <div className="card divide-y divide-slate-50">
+              <div className="card divide-y" style={{ borderColor: 'var(--border)' }}>
                 {history.map(m => (
-                  <div key={m.id} className="flex items-start gap-4 px-5 py-4 hover:bg-muted transition-colors">
+                  <div key={m.id}
+                    className="flex items-start gap-4 px-5 py-4 transition-colors"
+                    style={{ background: 'var(--card)' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--muted)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'var(--card)'}>
                     <div className="w-8 h-8 rounded-full flex items-center justify-center text-white shrink-0 mt-0.5"
                       style={{ background: TELEGRAM_BLUE }}>
                       <TelegramIcon size={14} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground font-mono">{m.chat_id}</p>
-                      <p className="text-sm text-muted mt-0.5 break-words">{m.message}</p>
+                      <p className="text-sm font-medium font-mono" style={{ color: 'var(--foreground)' }}>
+                        {m.chat_id}
+                      </p>
+                      <p className="text-sm mt-0.5 break-words" style={{ color: 'var(--muted-foreground)' }}>
+                        {m.message}
+                      </p>
                       {m.error_message && (
-                        <p className="text-xs text-red-500 mt-1 bg-red-50 rounded px-2 py-1">{m.error_message}</p>
+                        <p className="text-xs mt-1 px-2 py-1 rounded"
+                          style={{ color: 'var(--destructive)', background: 'color-mix(in srgb, var(--destructive) 10%, transparent)' }}>
+                          {m.error_message}
+                        </p>
                       )}
                     </div>
                     <div className="text-right shrink-0">
                       <span className={STATUS_COLORS[m.status] || 'badge-gray'}>{m.status}</span>
-                      <p className="text-xs text-muted mt-1">
+                      <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
                         {formatDistanceToNow(new Date(m.sent_at || m.created_at), { addSuffix: true })}
                       </p>
                     </div>

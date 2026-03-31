@@ -1,18 +1,23 @@
 """
-Scraper service — supports both static (httpx + BeautifulSoup/lxml)
-and dynamic (Playwright headless Chromium) page monitoring.
+Scraper service — supports static (httpx + BS4) and dynamic (Playwright) monitoring.
 
-Dynamic mode is activated when:
-  - monitor.use_playwright is True, OR
-  - The URL returns JS-rendered content (auto-detect via empty body heuristic)
+New features:
+- Decoupled monitor_selector vs. extract selector
+- Retry mechanism with configurable attempts
+- Duration tracking
+- Webhook notifications
+- Log delete/clear helpers
+- Run metrics (run_count, success_count, fail_count, consecutive_failures)
+- Dead-monitor auto-pause after N consecutive failures
 """
 import httpx
 import re
+import time
 from typing import Optional
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from app.models.scraper import ScraperMonitor, ScraperCheckLog, SelectorType, MonitorStatus
 import logging
 
@@ -27,11 +32,12 @@ DEFAULT_UA = (
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
 async def _fetch_static(url: str, user_agent: Optional[str] = None,
-                         extra_headers: Optional[dict] = None) -> str:
+                         extra_headers: Optional[dict] = None,
+                         timeout: int = 30) -> str:
     headers = {"User-Agent": user_agent or DEFAULT_UA}
     if extra_headers:
         headers.update(extra_headers)
-    async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         return resp.text
@@ -40,13 +46,6 @@ async def _fetch_static(url: str, user_agent: Optional[str] = None,
 async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
                           wait_selector: Optional[str] = None,
                           wait_ms: int = 3000) -> str:
-    """Use Playwright headless Chromium for JS-rendered pages.
-
-    After the page settles, we inject all live JS input/select/textarea .value
-    properties back into the DOM as 'value' attributes so BeautifulSoup can
-    read them — React and Vue control input values via JS properties, not HTML
-    attributes, so page.content() alone would always return empty inputs.
-    """
     try:
         from playwright.async_api import async_playwright
     except ImportError:
@@ -63,22 +62,17 @@ async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
             viewport={"width": 1280, "height": 900},
         )
         page = await context.new_page()
-
-        # Block images/fonts/media to speed things up
         await page.route("**/*.{png,jpg,jpeg,gif,webp,woff,woff2,ttf,mp4,mp3}", lambda r: r.abort())
-
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
         if wait_selector:
             try:
                 await page.wait_for_selector(wait_selector, timeout=10000)
             except Exception:
-                pass  # continue even if selector not found within timeout
+                pass
         else:
             await page.wait_for_timeout(wait_ms)
 
-        # Stamp live JS .value back onto HTML attributes so BS4 can see them.
-        # React/Vue control inputs via JS properties; page.content() misses them.
         await page.evaluate("""() => {
             document.querySelectorAll('input, select, textarea').forEach(el => {
                 if (el.value !== undefined && el.value !== '') {
@@ -93,47 +87,28 @@ async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
 
 
 def _should_use_playwright(html: str, url: str) -> bool:
-    """Heuristic: detect JS-rendered pages that need Playwright.
-
-    Checks for React/Vue/Angular/Svelte framework fingerprints AND short body
-    text. Both must be true to avoid false-positives on legitimate short static
-    pages (e.g. a minimal landing page or a plain API response page).
-    """
     soup = BeautifulSoup(html, "lxml")
     body = soup.body
     if body is None:
         return True
-
     text = body.get_text(strip=True)
     if len(text) >= 500:
-        # Enough content rendered — static fetch was sufficient
         return False
-
-    # Short body: check for JS framework signals before assuming JS-rendered
     js_signals = [
-        'id="root"', "id='root'",          # React / Vue
-        'id="app"', "id='app'",             # Vue
-        'id="__next"', "id='__next'",       # Next.js
-        'id="__nuxt"', "id='__nuxt'",       # Nuxt.js
-        "ng-version=",                       # Angular
-        "data-reactroot",                    # React SSR marker
-        "__svelte",                          # Svelte
-        "window.__INITIAL_STATE__",          # generic SSR hydration
-        "window.__NUXT__",
-        "window.__NEXT_DATA__",
+        'id="root"', "id='root'", 'id="app"', "id='app'",
+        'id="__next"', "id='__next'", 'id="__nuxt"', "id='__nuxt'",
+        "ng-version=", "data-reactroot", "__svelte",
+        "window.__INITIAL_STATE__", "window.__NUXT__", "window.__NEXT_DATA__",
     ]
-    html_lower = html[:8000]  # only scan the head/early body
+    html_lower = html[:8000]
     if any(sig in html_lower for sig in js_signals):
-        logger.debug(f"JS framework fingerprint detected — will use Playwright")
         return True
-
-    # Short body but no framework signals — probably just a short static page
     return False
 
 
 async def fetch_page(monitor: ScraperMonitor) -> str:
-    """Smart fetch: static first, auto-upgrade to Playwright if needed."""
     use_playwright = getattr(monitor, "use_playwright", False)
+    timeout = getattr(monitor, "timeout_seconds", 30) or 30
 
     if use_playwright:
         return await _fetch_dynamic(
@@ -143,19 +118,12 @@ async def fetch_page(monitor: ScraperMonitor) -> str:
             wait_ms=getattr(monitor, "wait_ms", 3000),
         )
 
-    # Static fetch first
-    html = await _fetch_static(monitor.url, monitor.user_agent, monitor.extra_headers)
+    html = await _fetch_static(monitor.url, monitor.user_agent, monitor.extra_headers, timeout)
 
-    # Auto-detect JS-rendered page
     if _should_use_playwright(html, monitor.url):
-        logger.info(f"Monitor {monitor.id}: static body too short — retrying with Playwright")
+        logger.info(f"Monitor {monitor.id}: static body short — retrying with Playwright")
         try:
-            # Use a longer default wait for auto-detected JS pages
-            html = await _fetch_dynamic(
-                monitor.url,
-                monitor.user_agent,
-                wait_ms=3000,
-            )
+            html = await _fetch_dynamic(monitor.url, monitor.user_agent, wait_ms=3000)
         except Exception as e:
             logger.warning(f"Playwright fallback failed: {e} — using static HTML")
 
@@ -164,10 +132,10 @@ async def fetch_page(monitor: ScraperMonitor) -> str:
 
 # ── Extract ───────────────────────────────────────────────────────────────────
 
-def _extract(html: str, selector_type: SelectorType,
-             selector: str, attribute: Optional[str]) -> Optional[str]:
+def _extract(html: str, selector_type, selector: str, attribute: Optional[str]) -> Optional[str]:
+    st = selector_type.value if hasattr(selector_type, "value") else str(selector_type)
 
-    if selector_type == SelectorType.CSS:
+    if st == "css":
         soup = BeautifulSoup(html, "lxml")
         els = soup.select(selector)
         if not els:
@@ -175,14 +143,13 @@ def _extract(html: str, selector_type: SelectorType,
         el = els[0]
         if attribute and attribute not in ("text", "innerText"):
             return el.get(attribute)
-        # For form elements, text content is empty — read the value attribute instead
         if el.name in ("input", "select", "textarea") and not attribute:
             val = el.get("value")
             if val is not None:
                 return val.strip()
         return el.get_text(strip=True)
 
-    elif selector_type == SelectorType.XPATH:
+    elif st == "xpath":
         from lxml import etree
         tree = etree.fromstring(html.encode(), etree.HTMLParser())
         results = tree.xpath(selector)
@@ -195,12 +162,12 @@ def _extract(html: str, selector_type: SelectorType,
             return first.get(attribute)
         return (first.text_content() if hasattr(first, "text_content") else str(first)).strip()
 
-    elif selector_type == SelectorType.TEXT:
+    elif st == "text":
         soup = BeautifulSoup(html, "lxml")
         page_text = soup.get_text()
         return selector if selector in page_text else None
 
-    elif selector_type == SelectorType.REGEX:
+    elif st == "regex":
         match = re.search(selector, html, re.IGNORECASE | re.DOTALL)
         if not match:
             return None
@@ -216,14 +183,13 @@ def _check_condition(value: Optional[str], operator: Optional[str],
     if not operator:
         return True
     if operator == "changed":
-        return True  # caller handles comparison with last_value
+        return True
     if value is None:
         return False
     if operator == "contains":
         return bool(cond_value) and cond_value in value
     if operator == "not_contains":
         return not (bool(cond_value) and cond_value in value)
-    # Numeric comparison — strip currency symbols and commas
     try:
         num = float(re.sub(r"[^\d.\-]", "", value))
         cnum = float(re.sub(r"[^\d.\-]", "", cond_value or ""))
@@ -238,40 +204,90 @@ def _check_condition(value: Optional[str], operator: Optional[str],
 
 # ── Check & notify ────────────────────────────────────────────────────────────
 
+async def _do_check(monitor: ScraperMonitor) -> tuple:
+    """Returns (value, error_str, duration_ms)"""
+    start = time.monotonic()
+    retry_attempts = getattr(monitor, "retry_attempts", 3) or 1
+    last_err = None
+
+    for attempt in range(max(1, retry_attempts)):
+        try:
+            html = await fetch_page(monitor)
+            # Determine extraction selector (may differ from monitor/trigger selector)
+            extract_selector = monitor.selector
+            extract_selector_type = monitor.selector_type
+            monitor_sel = getattr(monitor, "monitor_selector", None)
+            # If monitor_selector is set, use extract selector for data and monitor_selector for condition
+            # (The value returned here is always the extract selector result)
+            value = _extract(html, extract_selector_type, extract_selector, monitor.attribute)
+
+            # If there's a separate monitor_selector, also check it for the condition
+            monitor_value = value
+            if monitor_sel:
+                mon_st = getattr(monitor, "monitor_selector_type", None) or extract_selector_type
+                monitor_value = _extract(html, mon_st, monitor_sel, None)
+
+            duration_ms = int((time.monotonic() - start) * 1000)
+            return value, monitor_value, None, duration_ms, attempt
+        except Exception as e:
+            last_err = str(e)
+            logger.warning(f"Monitor {monitor.id} attempt {attempt + 1} failed: {e}")
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    return None, None, last_err, duration_ms, retry_attempts - 1
+
+
 async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperCheckLog:
     log = ScraperCheckLog(monitor_id=monitor.id)
     db.add(log)
 
-    try:
-        html = await fetch_page(monitor)
-        value = _extract(html, monitor.selector_type, monitor.selector, monitor.attribute)
-        log.value_found = value
+    value, monitor_value, error, duration_ms, retry_num = await _do_check(monitor)
 
-        prev_value = monitor.last_value  # capture before mutation
+    log.duration_ms = duration_ms
+    log.retry_num = retry_num
+
+    prev_value = monitor.last_value
+
+    if error:
+        log.error = error
+        log.condition_met = False
+        log.value_found = None
+        log.prev_value = prev_value
+        monitor.error_message = error
+        monitor.status = MonitorStatus.ERROR
+        monitor.last_checked_at = datetime.now(timezone.utc)
+        monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
+        monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
+        monitor.consecutive_failures = (getattr(monitor, "consecutive_failures", 0) or 0) + 1
+
+        # Auto-pause after too many consecutive failures
+        max_fail = getattr(monitor, "max_failures_before_pause", 10) or 10
+        if monitor.consecutive_failures >= max_fail:
+            monitor.status = MonitorStatus.PAUSED
+            logger.warning(f"Monitor {monitor.id} auto-paused after {monitor.consecutive_failures} failures")
+    else:
+        log.value_found = value
+        log.prev_value = prev_value
+
+        # Use monitor_value for condition check (may be same as value if no monitor_selector)
+        check_value = monitor_value if monitor_value is not None else value
 
         if monitor.condition_operator == "changed":
-            # First run: just baseline — never alert on the very first check
             if prev_value is None:
                 condition_met = False
             else:
-                condition_met = value != prev_value
+                condition_met = check_value != prev_value
         else:
-            condition_met = _check_condition(value, monitor.condition_operator, monitor.condition_value)
+            condition_met = _check_condition(check_value, monitor.condition_operator, monitor.condition_value)
 
         log.condition_met = condition_met
-        log.prev_value = prev_value  # store for context
         monitor.last_checked_at = datetime.now(timezone.utc)
         monitor.last_value = value
         monitor.error_message = None
         monitor.status = MonitorStatus.ACTIVE
-
-    except Exception as e:
-        logger.error(f"Monitor {monitor.id} check failed: {e}")
-        log.error = str(e)
-        log.condition_met = False
-        monitor.error_message = str(e)
-        monitor.status = MonitorStatus.ERROR
-        monitor.last_checked_at = datetime.now(timezone.utc)
+        monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
+        monitor.success_count = (getattr(monitor, "success_count", 0) or 0) + 1
+        monitor.consecutive_failures = 0
 
     await db.commit()
     return log
@@ -331,6 +347,24 @@ async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
             except Exception as e:
                 logger.error(f"Telegram notify failed for {r}: {e}")
 
+    # Webhook notification
+    webhook_url = getattr(monitor, "webhook_url", None)
+    if webhook_url:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(webhook_url, json={
+                    "monitor_id": monitor.id,
+                    "monitor_name": monitor.name,
+                    "url": monitor.url,
+                    "value": log.value_found,
+                    "prev_value": getattr(log, "prev_value", None),
+                    "condition_met": log.condition_met,
+                    "message": message,
+                    "checked_at": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception as e:
+            logger.error(f"Webhook notify failed for {webhook_url}: {e}")
+
     log.alerted = True
     monitor.last_alerted_at = datetime.now(timezone.utc)
     monitor.alert_count = (monitor.alert_count or 0) + 1
@@ -359,7 +393,7 @@ async def get_monitor(db: AsyncSession, monitor_id: int, user_id: int):
     return result.scalar_one_or_none()
 
 
-async def get_check_logs(db: AsyncSession, monitor_id: int, limit: int = 50):
+async def get_check_logs(db: AsyncSession, monitor_id: int, limit: int = 100):
     result = await db.execute(
         select(ScraperCheckLog)
         .where(ScraperCheckLog.monitor_id == monitor_id)
@@ -367,3 +401,25 @@ async def get_check_logs(db: AsyncSession, monitor_id: int, limit: int = 50):
         .limit(limit)
     )
     return result.scalars().all()
+
+
+async def delete_check_log(db: AsyncSession, log_id: int, monitor_id: int) -> bool:
+    result = await db.execute(
+        select(ScraperCheckLog).where(
+            ScraperCheckLog.id == log_id,
+            ScraperCheckLog.monitor_id == monitor_id,
+        )
+    )
+    log = result.scalar_one_or_none()
+    if not log:
+        return False
+    await db.delete(log)
+    await db.commit()
+    return True
+
+
+async def clear_check_logs(db: AsyncSession, monitor_id: int):
+    await db.execute(
+        delete(ScraperCheckLog).where(ScraperCheckLog.monitor_id == monitor_id)
+    )
+    await db.commit()

@@ -94,12 +94,15 @@ export const telegramApi = {
 }
 
 export const monitorsApi = {
-  list:      () => api.get('/monitors'),
-  create:    (d) => api.post('/monitors', d),
-  update:    (id, d) => api.patch(`/monitors/${id}`, d),
-  delete:    (id) => api.delete(`/monitors/${id}`),
-  checkNow:  (id) => api.post(`/monitors/${id}/check`),
-  logs:      (id, limit = 50) => api.get(`/monitors/${id}/logs?limit=${limit}`),
+  list:       () => api.get('/monitors'),
+  create:     (d) => api.post('/monitors', d),
+  update:     (id, d) => api.patch(`/monitors/${id}`, d),
+  delete:     (id) => api.delete(`/monitors/${id}`),
+  checkNow:   (id) => api.post(`/monitors/${id}/check`),
+  clone:      (id) => api.post(`/monitors/${id}/clone`),
+  logs:       (id, limit = 100) => api.get(`/monitors/${id}/logs?limit=${limit}`),
+  deleteLog:  (mid, lid) => api.delete(`/monitors/${mid}/logs/${lid}`),
+  clearLogs:  (mid) => api.delete(`/monitors/${mid}/logs`),
 }
 
 export const settingsApi = {
