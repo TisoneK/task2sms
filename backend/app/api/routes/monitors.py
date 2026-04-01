@@ -142,6 +142,11 @@ async def create_monitor(body: MonitorCreate,
     await db.refresh(m)
     from app.workers.scheduler import schedule_monitor
     schedule_monitor(m)
+    await db.commit()  # persist next_run_at written by schedule_monitor
+    # Auto-persist recipients as contacts
+    if m.notify_recipients:
+        from app.api.routes.contacts import bump_use_count
+        await bump_use_count(db, current_user.id, m.notify_recipients)
     return _out(m)
 
 
@@ -167,6 +172,11 @@ async def update_monitor(mid: int, body: MonitorUpdate,
     await db.refresh(m)
     from app.workers.scheduler import schedule_monitor
     schedule_monitor(m)
+    await db.commit()  # persist next_run_at written by schedule_monitor
+    # Auto-persist any new recipients as contacts
+    if m.notify_recipients:
+        from app.api.routes.contacts import bump_use_count
+        await bump_use_count(db, current_user.id, m.notify_recipients)
     return _out(m)
 
 
@@ -257,6 +267,7 @@ async def monitor_logs(mid: int, limit: int = 100,
         "condition_met": l.condition_met,
         "alerted": l.alerted, "error": l.error, "checked_at": l.checked_at,
         "duration_ms": getattr(l, "duration_ms", None),
+        "fetch_method": getattr(l, "fetch_method", None),
     } for l in logs]
 
 
@@ -280,3 +291,78 @@ async def clear_logs(mid: int,
     if not m:
         raise HTTPException(404, "Monitor not found")
     await clear_check_logs(db, mid)
+
+
+# ── Selector test (no saved monitor required) ─────────────────────────────
+
+class SelectorTestRequest(BaseModel):
+    url: str
+    selector_type: SelectorType = SelectorType.CSS
+    selector: str
+    attribute: Optional[str] = None
+    use_playwright: bool = False
+    wait_ms: int = 3000
+
+
+@router.post("/test-selector")
+async def test_selector(body: SelectorTestRequest,
+                        current_user=Depends(get_current_user)):
+    """Fire a one-off fetch+extract against any URL without saving a monitor.
+    Returns the extracted value (or null) plus a human-readable diagnosis."""
+    import time
+    from app.services.integrations.scraper_service import (
+        _fetch_static, _fetch_dynamic, _should_use_playwright, _extract
+    )
+
+    start = time.monotonic()
+    diagnosis = None
+    value = None
+    html = None
+    used_playwright = body.use_playwright
+
+    try:
+        if body.use_playwright:
+            html = await _fetch_dynamic(body.url, wait_ms=body.wait_ms)
+        else:
+            html = await _fetch_static(body.url)
+            if _should_use_playwright(html, body.url):
+                used_playwright = True
+                html = await _fetch_dynamic(body.url, wait_ms=body.wait_ms)
+
+        value = _extract(html, body.selector_type, body.selector, body.attribute)
+        duration_ms = int((time.monotonic() - start) * 1000)
+
+        if value is None:
+            diagnosis = (
+                "Selector not found in page. "
+                + ("Playwright was used — the page rendered but the element wasn't present. "
+                   "Double-check the selector with browser DevTools."
+                   if used_playwright else
+                   "Try enabling Playwright if the page is JavaScript-rendered.")
+            )
+        elif value == "":
+            diagnosis = (
+                "Element found but its text/value is empty. "
+                "For inputs try leaving Attribute blank (auto-reads .value). "
+                "For other elements check if the content loads after a delay — increase Wait time."
+            )
+        else:
+            diagnosis = "OK"
+
+        return {
+            "value": value,
+            "diagnosis": diagnosis,
+            "used_playwright": used_playwright,
+            "duration_ms": duration_ms,
+            "error": None,
+        }
+
+    except Exception as e:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        return {
+            "value": None,
+            "diagnosis": f"Fetch failed: {str(e)[:200]}",
+            "used_playwright": used_playwright,
+            "duration_ms": duration_ms,
+            "error": str(e)[:200],
+        }

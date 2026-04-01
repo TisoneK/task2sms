@@ -101,4 +101,5 @@ class ScraperCheckLog(Base):
     error = Column(Text, nullable=True)
     duration_ms = Column(Integer, nullable=True)
     retry_num = Column(Integer, default=0)
+    fetch_method = Column(String(20), nullable=True)  # static | playwright | static_fallback | unknown
     checked_at = Column(DateTime(timezone=True), server_default=func.now())

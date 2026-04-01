@@ -43,36 +43,77 @@ async def _fetch_static(url: str, user_agent: Optional[str] = None,
         return resp.text
 
 
+# Stealth JS injected before page load to defeat basic bot-detection
+_STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+window.chrome = { runtime: {} };
+Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+"""
+
+
 async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
                           wait_selector: Optional[str] = None,
                           wait_ms: int = 3000) -> str:
+    """Playwright headless fetch with stealth injection.
+
+    Raises RuntimeError if Playwright is not installed so the caller knows
+    exactly what happened instead of silently falling back to static.
+    """
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        logger.warning("Playwright not installed — falling back to static fetch")
-        return await _fetch_static(url, user_agent)
+        raise RuntimeError(
+            "Playwright is not installed. Run: playwright install chromium"
+        )
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-extensions",
+                "--no-first-run",
+                "--disable-default-apps",
+            ],
         )
         context = await browser.new_context(
             user_agent=user_agent or DEFAULT_UA,
             viewport={"width": 1280, "height": 900},
+            locale="en-US",
+            timezone_id="America/New_York",
+            # Appear as a real browser, not a bot
+            java_script_enabled=True,
+            accept_downloads=False,
         )
+
+        # Inject stealth script before every page navigation
+        await context.add_init_script(_STEALTH_JS)
+
         page = await context.new_page()
-        await page.route("**/*.{png,jpg,jpeg,gif,webp,woff,woff2,ttf,mp4,mp3}", lambda r: r.abort())
+
+        # Block only heavy media — keep CSS/fonts so the page renders normally
+        # (blocking too much can make sites detect us as a bot)
+        await page.route(
+            "**/*.{mp4,mp3,avi,webm,ogg}",
+            lambda r: r.abort()
+        )
+
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
         if wait_selector:
             try:
                 await page.wait_for_selector(wait_selector, timeout=10000)
             except Exception:
-                pass
+                pass  # continue even if selector not found in time
         else:
             await page.wait_for_timeout(wait_ms)
 
+        # Stamp live JS input .value back onto HTML attributes
         await page.evaluate("""() => {
             document.querySelectorAll('input, select, textarea').forEach(el => {
                 if (el.value !== undefined && el.value !== '') {
@@ -106,28 +147,37 @@ def _should_use_playwright(html: str, url: str) -> bool:
     return False
 
 
-async def fetch_page(monitor: ScraperMonitor) -> str:
+async def fetch_page(monitor: ScraperMonitor) -> tuple:
+    """Returns (html: str, fetch_method: str).
+
+    fetch_method is one of: 'static', 'playwright', 'static_fallback'
+    Raises on unrecoverable errors (including Playwright not installed when required).
+    """
     use_playwright = getattr(monitor, "use_playwright", False)
     timeout = getattr(monitor, "timeout_seconds", 30) or 30
 
     if use_playwright:
-        return await _fetch_dynamic(
+        # Playwright explicitly requested — do not silently fall back
+        html = await _fetch_dynamic(
             monitor.url,
             user_agent=monitor.user_agent,
             wait_selector=monitor.wait_selector if hasattr(monitor, "wait_selector") else None,
             wait_ms=getattr(monitor, "wait_ms", 3000),
         )
+        return html, "playwright"
 
     html = await _fetch_static(monitor.url, monitor.user_agent, monitor.extra_headers, timeout)
 
     if _should_use_playwright(html, monitor.url):
-        logger.info(f"Monitor {monitor.id}: static body short — retrying with Playwright")
+        logger.info(f"Monitor {monitor.id}: JS framework detected — retrying with Playwright")
         try:
             html = await _fetch_dynamic(monitor.url, monitor.user_agent, wait_ms=3000)
+            return html, "playwright"
         except Exception as e:
-            logger.warning(f"Playwright fallback failed: {e} — using static HTML")
+            logger.warning(f"Playwright auto-upgrade failed: {e} — using static HTML")
+            return html, "static_fallback"
 
-    return html
+    return html, "static"
 
 
 # ── Extract ───────────────────────────────────────────────────────────────────
@@ -205,46 +255,43 @@ def _check_condition(value: Optional[str], operator: Optional[str],
 # ── Check & notify ────────────────────────────────────────────────────────────
 
 async def _do_check(monitor: ScraperMonitor) -> tuple:
-    """Returns (value, error_str, duration_ms)"""
+    """Returns (value, monitor_value, error, duration_ms, retry_num, fetch_method)"""
     start = time.monotonic()
     retry_attempts = getattr(monitor, "retry_attempts", 3) or 1
     last_err = None
 
     for attempt in range(max(1, retry_attempts)):
         try:
-            html = await fetch_page(monitor)
-            # Determine extraction selector (may differ from monitor/trigger selector)
+            html, fetch_method = await fetch_page(monitor)
             extract_selector = monitor.selector
             extract_selector_type = monitor.selector_type
             monitor_sel = getattr(monitor, "monitor_selector", None)
-            # If monitor_selector is set, use extract selector for data and monitor_selector for condition
-            # (The value returned here is always the extract selector result)
             value = _extract(html, extract_selector_type, extract_selector, monitor.attribute)
 
-            # If there's a separate monitor_selector, also check it for the condition
             monitor_value = value
             if monitor_sel:
                 mon_st = getattr(monitor, "monitor_selector_type", None) or extract_selector_type
                 monitor_value = _extract(html, mon_st, monitor_sel, None)
 
             duration_ms = int((time.monotonic() - start) * 1000)
-            return value, monitor_value, None, duration_ms, attempt
+            return value, monitor_value, None, duration_ms, attempt, fetch_method
         except Exception as e:
             last_err = str(e)
             logger.warning(f"Monitor {monitor.id} attempt {attempt + 1} failed: {e}")
 
     duration_ms = int((time.monotonic() - start) * 1000)
-    return None, None, last_err, duration_ms, retry_attempts - 1
+    return None, None, last_err, duration_ms, retry_attempts - 1, "unknown"
 
 
 async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperCheckLog:
     log = ScraperCheckLog(monitor_id=monitor.id)
     db.add(log)
 
-    value, monitor_value, error, duration_ms, retry_num = await _do_check(monitor)
+    value, monitor_value, error, duration_ms, retry_num, fetch_method = await _do_check(monitor)
 
     log.duration_ms = duration_ms
     log.retry_num = retry_num
+    log.fetch_method = fetch_method
 
     prev_value = monitor.last_value
 
@@ -282,7 +329,10 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
 
         log.condition_met = condition_met
         monitor.last_checked_at = datetime.now(timezone.utc)
-        monitor.last_value = value
+        # Store check_value (the thing we compare) as last_value so that the
+        # next run's prev_value is consistent with what we actually checked.
+        # log.value_found still holds the raw extract value for display.
+        monitor.last_value = check_value
         monitor.error_message = None
         monitor.status = MonitorStatus.ACTIVE
         monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
@@ -369,6 +419,15 @@ async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
     monitor.last_alerted_at = datetime.now(timezone.utc)
     monitor.alert_count = (monitor.alert_count or 0) + 1
     await db.commit()
+
+    # Bump use_count on contacts so they surface at top of suggestions
+    if recipients:
+        try:
+            from app.api.routes.contacts import bump_use_count
+            await bump_use_count(db, monitor.user_id, recipients)
+        except Exception as e:
+            logger.warning(f"bump_use_count failed: {e}")
+
     return log
 
 

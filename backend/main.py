@@ -8,7 +8,7 @@ from app.api.routes import (
     auth, tasks, notifications, stats,
     settings as settings_router, organizations,
     webhooks, analytics, datasources,
-    whatsapp, email_api, telegram_api, monitors,
+    whatsapp, email_api, telegram_api, monitors, contacts, picker,
 )
 import logging
 
@@ -47,7 +47,7 @@ ROUTERS = [
     stats.router, settings_router.router, organizations.router,
     webhooks.router, analytics.router, datasources.router,
     whatsapp.router, email_api.router,
-    telegram_api.router, monitors.router,
+    telegram_api.router, monitors.router, contacts.router, picker.router,
 ]
 
 for router in ROUTERS:

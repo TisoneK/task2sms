@@ -22,14 +22,14 @@ def _interval_seconds(value: int, unit: str) -> int:
 
 
 def _monitor_interval_seconds(monitor: ScraperMonitor) -> int:
-    """Return the interval in seconds for a monitor, respecting unit field."""
+    """Return the interval in seconds for a monitor.
+
+    check_interval_minutes holds the numeric value (despite the name);
+    check_interval_unit tells us what unit that value is in.
+    """
     unit = getattr(monitor, "check_interval_unit", "minutes") or "minutes"
-    if unit == "minutes":
-        # Legacy: check_interval_minutes is always in minutes
-        return max((monitor.check_interval_minutes or 60) * 60, 1)
-    else:
-        val = monitor.check_interval_minutes or 1
-        return max(_interval_seconds(val, unit), 1)
+    val = monitor.check_interval_minutes or 1
+    return max(_interval_seconds(val, unit), 1)
 
 
 # ── Tasks ─────────────────────────────────────────────────────────────────
@@ -69,17 +69,44 @@ def unschedule_task(task_id: int):
 
 # ── Monitors ──────────────────────────────────────────────────────────────
 
+def _in_time_window(monitor: ScraperMonitor) -> bool:
+    """Return False if current UTC time is outside the monitor's time window or on a skipped day."""
+    now = datetime.now(timezone.utc)
+    if getattr(monitor, 'skip_weekends', False) and now.weekday() >= 5:  # 5=Sat, 6=Sun
+        return False
+    start = getattr(monitor, 'time_window_start', None)
+    end = getattr(monitor, 'time_window_end', None)
+    if start and end:
+        try:
+            sh, sm = map(int, start.split(':'))
+            eh, em = map(int, end.split(':'))
+            cur = now.hour * 60 + now.minute
+            s = sh * 60 + sm
+            e = eh * 60 + em
+            if s <= e:  # same-day window e.g. 09:00–17:00
+                return s <= cur <= e
+            else:  # overnight window e.g. 22:00–06:00
+                return cur >= s or cur <= e
+        except Exception:
+            pass  # malformed window — run anyway
+    return True
+
+
 async def _run_monitor(monitor_id: int):
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(ScraperMonitor).where(ScraperMonitor.id == monitor_id))
         monitor = result.scalar_one_or_none()
         if monitor and monitor.status == MonitorStatus.ACTIVE:
+            if not _in_time_window(monitor):
+                logger.debug(f"Monitor {monitor_id} skipped — outside time window / weekend")
+                return
             try:
                 await run_monitor_and_notify(db, monitor)
-                # Update next_run_at on the monitor record
-                await _update_next_run(db, monitor_id)
             except Exception as e:
                 logger.error(f"Monitor {monitor_id} run error: {e}")
+            finally:
+                # Always update next_run_at after a run (even on error)
+                await _update_next_run(db, monitor_id)
 
 
 async def _update_next_run(db, monitor_id: int):
@@ -133,14 +160,13 @@ def schedule_monitor(monitor: ScraperMonitor):
         next_run_time=next_run,
     )
 
-    # Persist next_run_at synchronously if possible
+    # Write next_run_at onto the in-memory object so the caller can commit it
     job = scheduler.get_job(job_id)
-    if job and job.next_run_time:
-        # Will be updated async later; store approximate value now
-        pass
+    if job and job.next_run_time and hasattr(monitor, 'next_run_at'):
+        monitor.next_run_at = job.next_run_time
 
     logger.info(f"Scheduled monitor {monitor.id} ({monitor.name}) [{schedule_type}]"
-                + (f", next run at {next_run}" if next_run else ""))
+                + (f", next run at {job.next_run_time if job else None}"))
 
 
 def unschedule_monitor(monitor_id: int):
@@ -178,7 +204,8 @@ async def load_all_monitors():
         result = await db.execute(select(ScraperMonitor).where(ScraperMonitor.status == MonitorStatus.ACTIVE))
         monitors = result.scalars().all()
         for m in monitors:
-            schedule_monitor(m)
+            schedule_monitor(m)  # mutates m.next_run_at in-memory
+        await db.commit()  # flush next_run_at for all monitors in one shot
         logger.info(f"Loaded {len(monitors)} monitors")
 
 

@@ -20,3 +20,5 @@ __all__ = [
     "TelegramMessage", "TelegramStatus",
     "ScraperMonitor", "ScraperCheckLog", "SelectorType", "MonitorStatus",
 ]
+
+from app.models.contact import Contact  # noqa

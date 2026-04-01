@@ -94,6 +94,7 @@ export const telegramApi = {
 }
 
 export const monitorsApi = {
+  testSelector: (d) => api.post('/monitors/test-selector', d),
   list:       () => api.get('/monitors'),
   create:     (d) => api.post('/monitors', d),
   update:     (id, d) => api.patch(`/monitors/${id}`, d),
@@ -108,6 +109,13 @@ export const monitorsApi = {
 export const settingsApi = {
   updateProfile:  (d) => api.patch('/settings/profile', d),
   changePassword: (d) => api.post('/settings/change-password', d),
+}
+
+export const contactsApi = {
+  list:   ()      => api.get('/contacts'),
+  create: (d)     => api.post('/contacts', d),
+  update: (id, d) => api.patch(`/contacts/${id}`, d),
+  delete: (id)    => api.delete(`/contacts/${id}`),
 }
 
 export default api
