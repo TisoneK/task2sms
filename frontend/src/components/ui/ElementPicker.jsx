@@ -46,7 +46,7 @@ export default function ElementPicker({ url, onSelect, onClose }) {
     if (!token) {
       setPhaseSync('error')
       setStatus('Not authenticated — please log in again.')
-      return
+      return () => {}
     }
 
     setPhaseSync('loading')
@@ -62,7 +62,7 @@ export default function ElementPicker({ url, onSelect, onClose }) {
     } catch (e) {
       setPhaseSync('error')
       setStatus('Failed to open WebSocket connection.')
-      return
+      return () => {}
     }
     wsRef.current = ws
 
@@ -76,7 +76,8 @@ export default function ElementPicker({ url, onSelect, onClose }) {
     }, 45000)
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'navigate', url }))
+      // Don't navigate yet — wait for the backend to signal it's ready
+      // (the backend sends a status "Ready. Send a navigate message." once the browser is up)
     }
 
     ws.onmessage = (e) => {
@@ -85,6 +86,10 @@ export default function ElementPicker({ url, onSelect, onClose }) {
 
       if (msg.type === 'status') {
         setStatus(msg.message)
+        // Once the backend browser is ready, trigger navigation
+        if (msg.message.toLowerCase().startsWith('ready') && phaseRef.current === 'loading') {
+          ws.send(JSON.stringify({ type: 'navigate', url }))
+        }
       }
       else if (msg.type === 'screenshot') {
         clearTimeout(connectTimeout)

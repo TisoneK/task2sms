@@ -17,31 +17,40 @@ Server → Client:
                           "suggested_strip": "KES," }
   { "type": "error",      "message": "..." }
   { "type": "status",     "message": "Loading page..." }
+
+Windows / uvicorn --reload fix:
+  asyncio.create_subprocess_exec is broken on Windows when uvicorn uses the
+  watchfiles reloader (it swaps in a non-ProactorEventLoop).  Using
+  async_playwright() therefore raises NotImplementedError.
+
+  Fix: run the entire Playwright session synchronously inside a ThreadPoolExecutor
+  thread (sync_playwright works fine there).  The WebSocket coroutine bridges
+  to the thread via two plain queues.
 """
 import asyncio
 import base64
 import json
+import multiprocessing
 import re
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from jose import JWTError, jwt
 from app.core.config import settings
 
 router = APIRouter(prefix="/ws", tags=["picker"])
 
+# One shared executor — Playwright processes are heavy, limit concurrency.
+_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="picker")
 
-# ── Selector generation ────────────────────────────────────────────────────────
+
+# ── JavaScript helpers ─────────────────────────────────────────────────────────
 
 _SELECTOR_JS = """
 (el) => {
-    // Build a stable CSS selector for this element, preferring:
-    // 1. id
-    // 2. data-* attributes
-    // 3. meaningful class combinations
-    // 4. parent anchoring (stop at body)
-    // Avoid: nth-child, positional selectors
-
     function stableClasses(node) {
-        // Filter out dynamic/layout classes, keep semantic ones
         const skip = /^(a-[a-z]-|aok-|a-ws-|injected|active|hover|focus|selected|disabled|hidden|show|fade)/;
         return Array.from(node.classList)
             .filter(c => c.length > 2 && !skip.test(c) && !/\\d{4,}/.test(c))
@@ -63,20 +72,17 @@ _SELECTOR_JS = """
         return node.tagName.toLowerCase();
     }
 
-    // Walk up the DOM collecting path segments, stop at body
     const path = [];
     let current = el;
     let depth = 0;
     while (current && current !== document.body && depth < 5) {
         path.unshift(selectorForNode(current));
-        // Stop if this segment is already unique
         if (document.querySelectorAll(path.join(' ')).length === 1) break;
         current = current.parentElement;
         depth++;
     }
 
     const selector = path.join(' ');
-    // Verify uniqueness; if not unique, try adding parent
     const matches = document.querySelectorAll(selector);
     return { selector, matchCount: matches.length };
 }
@@ -85,28 +91,18 @@ _SELECTOR_JS = """
 _HOVER_JS = """
 (args) => {
     const { x, y } = args;
-    // Remove old highlight
     const old = document.getElementById('__picker_highlight__');
     if (old) old.remove();
-
     const el = document.elementFromPoint(x, y);
     if (!el || el === document.body) return null;
-
     const rect = el.getBoundingClientRect();
     const hl = document.createElement('div');
     hl.id = '__picker_highlight__';
     hl.style.cssText = [
-        'position:fixed',
-        'pointer-events:none',
-        'z-index:2147483647',
-        'box-sizing:border-box',
-        'outline:2px solid #06b6d4',
-        'background:rgba(6,182,212,0.08)',
-        'transition:all 0.08s ease',
-        'top:'    + rect.top    + 'px',
-        'left:'   + rect.left   + 'px',
-        'width:'  + rect.width  + 'px',
-        'height:' + rect.height + 'px',
+        'position:fixed','pointer-events:none','z-index:2147483647','box-sizing:border-box',
+        'outline:2px solid #06b6d4','background:rgba(6,182,212,0.08)','transition:all 0.08s ease',
+        'top:'    + rect.top    + 'px','left:'   + rect.left   + 'px',
+        'width:'  + rect.width  + 'px','height:' + rect.height + 'px',
     ].join(';');
     document.body.appendChild(hl);
     return { top: rect.top, left: rect.left, width: rect.width, height: rect.height,
@@ -119,29 +115,18 @@ _CLICK_JS = """
     const { x, y } = args;
     const old = document.getElementById('__picker_highlight__');
     if (old) old.remove();
-
     const el = document.elementFromPoint(x, y);
     if (!el || el === document.body) return null;
-
     const rect = el.getBoundingClientRect();
-
-    // Draw a persistent selection highlight
     const hl = document.createElement('div');
     hl.id = '__picker_highlight__';
     hl.style.cssText = [
-        'position:fixed',
-        'pointer-events:none',
-        'z-index:2147483647',
-        'box-sizing:border-box',
-        'outline:2px solid #22c55e',
-        'background:rgba(34,197,94,0.1)',
-        'top:'    + rect.top    + 'px',
-        'left:'   + rect.left   + 'px',
-        'width:'  + rect.width  + 'px',
-        'height:' + rect.height + 'px',
+        'position:fixed','pointer-events:none','z-index:2147483647','box-sizing:border-box',
+        'outline:2px solid #22c55e','background:rgba(34,197,94,0.1)',
+        'top:'    + rect.top    + 'px','left:'   + rect.left   + 'px',
+        'width:'  + rect.width  + 'px','height:' + rect.height + 'px',
     ].join(';');
     document.body.appendChild(hl);
-
     return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
 }
 """
@@ -154,16 +139,14 @@ window.chrome = { runtime: {} };
 """
 
 
+# ── Value inference ────────────────────────────────────────────────────────────
+
 def _infer_value_meta(value: str) -> dict:
-    """Given an extracted string value, suggest type, operator, and transform."""
     if not value:
         return {}
-
-    # Strip common currency/unit symbols to test if it's numeric
     stripped = re.sub(r"[^\d.\-]", "", value)
     try:
         float(stripped)
-        # Looks numeric — detect currency prefix/suffix
         currency = re.match(r"^([A-Z]{2,3}|[$€£¥₹])", value.strip())
         separators = "," if "," in value else ""
         return {
@@ -174,17 +157,15 @@ def _infer_value_meta(value: str) -> dict:
         }
     except (ValueError, TypeError):
         pass
-
-    # Stock-like status text
     lower = value.lower()
     if any(w in lower for w in ("stock", "available", "sold", "out", "yes", "no")):
         return {"value_type": "status", "suggested_operator": "changed"}
-
     return {"value_type": "text", "suggested_operator": "changed"}
 
 
+# ── Auth ───────────────────────────────────────────────────────────────────────
+
 async def _verify_token(token: str) -> int | None:
-    """Return user_id from JWT or None if invalid."""
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         uid = payload.get("sub")
@@ -193,62 +174,38 @@ async def _verify_token(token: str) -> int | None:
         return None
 
 
-@router.websocket("/picker")
-async def picker_ws(websocket: WebSocket, token: str = Query(...)):
-    """Visual element picker over WebSocket."""
+# ── Playwright subprocess ───────────────────────────────────────────────────────
 
-    # Authenticate before accepting
-    user_id = await _verify_token(token)
-    if not user_id:
-        await websocket.close(code=4001, reason="Unauthorized")
-        return
-
-    await websocket.accept()
-
+def _run_playwright_subprocess(conn):
+    """
+    Runs Playwright in a completely separate process with its own event loop.
+    Uses multiprocessing.Connection for IPC.
+    """
     try:
-        from playwright.async_api import async_playwright
+        from playwright.sync_api import sync_playwright
     except ImportError as e:
-        await websocket.send_json({"type": "error", "message": f"Playwright is not installed on the server. Import error: {str(e)}"})
-        await websocket.close()
+        conn.send({"type": "error", "message": f"Playwright not installed: {e}"})
         return
 
-    pw = None
-    browser = None
-    page = None
-
-    async def send(data: dict):
-        try:
-            await websocket.send_json(data)
-        except Exception:
-            pass
-
-    async def screenshot_b64() -> str:
-        png = await page.screenshot(type="png", full_page=False)
+    def screenshot_b64(page) -> str:
+        png = page.screenshot(type="png", full_page=False)
         return base64.b64encode(png).decode()
 
+    pw = browser = page = None
     try:
-        await send({"type": "status", "message": "Starting browser..."})
-        print("DEBUG: Starting Playwright...")
-        pw = await async_playwright().start()
-        print("DEBUG: Playwright started, launching browser...")
-        browser = await asyncio.wait_for(
-            pw.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-accelerated-2d-canvas",
-                    "--no-first-run",
-                    "--no-zygote",
-                    "--single-process",
-                    "--disable-gpu"
-                ],
-            ),
-            timeout=15.0  # Reduced timeout
+        conn.send({"type": "status", "message": "Starting browser..."})
+        pw = sync_playwright().start()
+        browser = pw.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox", 
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--no-first-run",
+            ],
         )
-        print("DEBUG: Browser launched successfully")
-        context = await browser.new_context(
+        context = browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -257,101 +214,83 @@ async def picker_ws(websocket: WebSocket, token: str = Query(...)):
             viewport={"width": 1280, "height": 900},
             locale="en-US",
         )
-        print("DEBUG: Context created")
-        await context.add_init_script(_STEALTH_JS)
-        page = await context.new_page()
-        print("DEBUG: Page created, ready for navigation")
+        context.add_init_script(_STEALTH_JS)
+        page = context.new_page()
 
-        await send({"type": "status", "message": "Ready. Send a navigate message."})
+        conn.send({"type": "status", "message": "Ready. Send a navigate message."})
 
         while True:
             try:
-                raw = await asyncio.wait_for(websocket.receive_text(), timeout=120)
-            except asyncio.TimeoutError:
-                await send({"type": "error", "message": "Session timed out after 2 minutes of inactivity."})
-                break
-            except WebSocketDisconnect:
+                msg = conn.recv()
+            except Exception:
                 break
 
-            try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                await send({"type": "error", "message": "Invalid JSON"})
-                continue
+            if msg is None:  # sentinel - client disconnected
+                break
 
             mtype = msg.get("type")
 
             if mtype == "navigate":
                 url = msg.get("url", "").strip()
                 if not url.startswith("http"):
-                    await send({"type": "error", "message": "URL must start with http or https"})
+                    conn.send({"type": "error", "message": "URL must start with http or https"})
                     continue
-                await send({"type": "status", "message": f"Loading {url}..."})
+                conn.send({"type": "status", "message": f"Loading {url}..."})
                 try:
-                    print(f"DEBUG: Navigating to {url}")
-                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    print("DEBUG: Page loaded, waiting 2.5 seconds...")
-                    await page.wait_for_timeout(2500)
-                    print("DEBUG: Taking screenshot...")
-                    img = await screenshot_b64()
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(2500)
+                    img = screenshot_b64(page)
                     vp = page.viewport_size or {"width": 1280, "height": 900}
-                    await send({"type": "screenshot", "data": img,
-                                "width": vp["width"], "height": vp["height"]})
-                    print("DEBUG: Screenshot sent")
+                    conn.send({"type": "screenshot", "data": img,
+                               "width": vp["width"], "height": vp["height"]})
                 except Exception as e:
-                    print(f"DEBUG: Navigation failed: {e}")
-                    await send({"type": "error", "message": f"Navigation failed: {str(e)[:200]}"})
+                    conn.send({"type": "error", "message": f"Navigation failed: {str(e)[:200]}"})
 
             elif mtype == "hover":
                 x, y = msg.get("x", 0), msg.get("y", 0)
                 try:
-                    rect = await page.evaluate(_HOVER_JS, {"x": x, "y": y})
+                    rect = page.evaluate(_HOVER_JS, {"x": x, "y": y})
                     if rect:
-                        img = await screenshot_b64()
-                        await send({"type": "hover_ack", "rect": rect, "data": img})
+                        img = screenshot_b64(page)
+                        conn.send({"type": "hover_ack", "rect": rect, "data": img})
                 except Exception:
-                    pass  # hover errors are non-fatal
+                    pass
 
             elif mtype == "click":
                 x, y = msg.get("x", 0), msg.get("y", 0)
                 try:
-                    rect = await page.evaluate(_CLICK_JS, {"x": x, "y": y})
+                    rect = page.evaluate(_CLICK_JS, {"x": x, "y": y})
                     if not rect:
-                        await send({"type": "error", "message": "Could not identify element at that position."})
+                        conn.send({"type": "error", "message": "Could not identify element at that position."})
                         continue
 
-                    # Generate selector
-                    sel_result = await page.evaluate(
+                    sel_result = page.evaluate(
                         f"(el) => ({_SELECTOR_JS.strip()[1:-1].strip()})(el)",
-                        await page.evaluate_handle(f"document.elementFromPoint({x}, {y})")
+                        page.evaluate_handle(f"document.elementFromPoint({x}, {y})")
                     )
                     selector = sel_result.get("selector", "") if sel_result else ""
 
-                    # Extract value using the selector
                     value = None
                     if selector:
                         try:
-                            el_handle = await page.query_selector(selector)
+                            el_handle = page.query_selector(selector)
                             if el_handle:
-                                tag = await el_handle.evaluate("el => el.tagName.toLowerCase()")
+                                tag = el_handle.evaluate("el => el.tagName.toLowerCase()")
                                 if tag in ("input", "select", "textarea"):
-                                    value = await el_handle.evaluate("el => el.value")
+                                    value = el_handle.evaluate("el => el.value")
                                 else:
-                                    # Try .a-offscreen child first (Amazon pattern)
-                                    offscreen = await el_handle.query_selector(".a-offscreen")
+                                    offscreen = el_handle.query_selector(".a-offscreen")
                                     if offscreen:
-                                        value = (await offscreen.text_content() or "").strip()
+                                        value = (offscreen.text_content() or "").strip()
                                         selector = selector + " .a-offscreen"
                                     else:
-                                        value = (await el_handle.text_content() or "").strip()
+                                        value = (el_handle.text_content() or "").strip()
                         except Exception:
                             pass
 
-                    # Take screenshot with green highlight
-                    img = await screenshot_b64()
-
+                    img = screenshot_b64(page)
                     meta = _infer_value_meta(value or "")
-                    await send({
+                    conn.send({
                         "type": "selected",
                         "selector": selector,
                         "value": value,
@@ -359,71 +298,118 @@ async def picker_ws(websocket: WebSocket, token: str = Query(...)):
                         "data": img,
                         **meta,
                     })
-
                 except Exception as e:
-                    await send({"type": "error", "message": f"Click failed: {str(e)[:200]}"})
+                    conn.send({"type": "error", "message": f"Click failed: {str(e)[:200]}"})
 
             elif mtype == "validate":
-                # Re-navigate and re-run selector to confirm stability
                 selector = msg.get("selector", "")
                 url = msg.get("url", "")
                 if not selector or not url:
-                    await send({"type": "error", "message": "selector and url required for validate"})
+                    conn.send({"type": "error", "message": "selector and url required for validate"})
                     continue
-                await send({"type": "status", "message": "Re-loading page to validate selector stability..."})
+                conn.send({"type": "status", "message": "Re-loading page to validate selector stability..."})
                 try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    await page.wait_for_timeout(2500)
-                    el_handle = await page.query_selector(selector)
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(2500)
+                    el_handle = page.query_selector(selector)
                     if el_handle:
-                        tag = await el_handle.evaluate("el => el.tagName.toLowerCase()")
-                        if tag in ("input", "select", "textarea"):
-                            value = await el_handle.evaluate("el => el.value")
-                        else:
-                            value = (await el_handle.text_content() or "").strip()
-                        await send({"type": "validated", "selector": selector,
-                                    "value": value, "stable": True})
+                        tag = el_handle.evaluate("el => el.tagName.toLowerCase()")
+                        value = el_handle.evaluate("el => el.value") if tag in ("input", "select", "textarea") \
+                            else (el_handle.text_content() or "").strip()
+                        conn.send({"type": "validated", "selector": selector, "value": value, "stable": True})
                     else:
-                        await send({"type": "validated", "selector": selector,
-                                    "value": None, "stable": False,
-                                    "message": "Selector did not match after reload — it may be unstable."})
-                except asyncio.TimeoutError:
-                    await send({"type": "error", "message": "Browser launch timed out. Server may be low on resources or Playwright not properly installed."})
-                    await websocket.close()
-                    return
+                        conn.send({"type": "validated", "selector": selector, "value": None, "stable": False,
+                                   "message": "Selector did not match after reload — it may be unstable."})
                 except Exception as e:
-                    await send({"type": "error", "message": f"Failed to start browser: {str(e)[:200]}"})
-                    await websocket.close()
-                    return
+                    conn.send({"type": "error", "message": f"Validation failed: {str(e)[:200]}"})
 
             elif mtype == "close":
                 break
 
             else:
-                await send({"type": "error", "message": f"Unknown message type: {mtype}"})
+                conn.send({"type": "error", "message": f"Unknown message type: {mtype}"})
 
     except Exception as e:
-        await send({"type": "error", "message": f"Failed to start browser: {str(e)[:200]}"})
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
+        conn.send({"type": "error", "message": f"Browser error: {str(e)[:300]}"})
+    finally:
+        for obj, method in [(page, "close"), (browser, "close"), (pw, "stop")]:
+            if obj:
+                try:
+                    getattr(obj, method)()
+                except Exception:
+                    pass
+        conn.send(None)  # sentinel - process is done
+
+
+# ── WebSocket handler ──────────────────────────────────────────────────────────
+
+@router.websocket("/picker")
+async def picker_ws(websocket: WebSocket, token: str = Query(...)):
+    """Visual element picker over WebSocket."""
+
+    user_id = await _verify_token(token)
+    if not user_id:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+
+    await websocket.accept()
+
+    # Create multiprocessing pipe for IPC
+    parent_conn, child_conn = multiprocessing.Pipe()
+    
+    # Start Playwright in separate process
+    process = multiprocessing.Process(
+        target=_run_playwright_subprocess,
+        args=(child_conn,),
+        daemon=True
+    )
+    process.start()
+
+    async def relay_outbound():
+        """Forward messages from the Playwright process to the WebSocket client."""
+        while True:
+            try:
+                # Check for messages from subprocess without blocking
+                if parent_conn.poll():
+                    msg = parent_conn.recv()
+                    if msg is None:  # sentinel - process done
+                        break
+                    await websocket.send_json(msg)
+                else:
+                    # Small delay to prevent busy-waiting
+                    await asyncio.sleep(0.01)
+            except Exception:
+                break
+
+    async def relay_inbound():
+        """Forward WebSocket messages to the Playwright process."""
         try:
-            await websocket.send_json({"type": "error", "message": str(e)[:300]})
+            while True:
+                try:
+                    raw = await asyncio.wait_for(websocket.receive_text(), timeout=120)
+                except asyncio.TimeoutError:
+                    parent_conn.send(None)  # shut down process
+                    break
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                parent_conn.send(msg)
+                if msg.get("type") == "close":
+                    break
+        except WebSocketDisconnect:
+            parent_conn.send(None)  # shut down process
+
+    try:
+        await asyncio.gather(relay_outbound(), relay_inbound())
+    except Exception:
+        parent_conn.send(None)
+    finally:
+        # Clean up process
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
+        try:
+            await websocket.close()
         except Exception:
             pass
-    finally:
-        if page:
-            try:
-                await page.close()
-            except Exception:
-                pass
-        if browser:
-            try:
-                await browser.close()
-            except Exception:
-                pass
-        if pw:
-            try:
-                await pw.stop()
-            except Exception:
-                pass
