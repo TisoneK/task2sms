@@ -207,8 +207,8 @@ async def picker_ws(websocket: WebSocket, token: str = Query(...)):
 
     try:
         from playwright.async_api import async_playwright
-    except ImportError:
-        await websocket.send_json({"type": "error", "message": "Playwright is not installed on the server."})
+    except ImportError as e:
+        await websocket.send_json({"type": "error", "message": f"Playwright is not installed on the server. Import error: {str(e)}"})
         await websocket.close()
         return
 
@@ -228,15 +228,26 @@ async def picker_ws(websocket: WebSocket, token: str = Query(...)):
 
     try:
         await send({"type": "status", "message": "Starting browser..."})
+        print("DEBUG: Starting Playwright...")
         pw = await async_playwright().start()
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                "--disable-blink-features=AutomationControlled",
-                "--no-first-run", "--disable-default-apps",
-            ],
+        print("DEBUG: Playwright started, launching browser...")
+        browser = await asyncio.wait_for(
+            pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-accelerated-2d-canvas",
+                    "--no-first-run",
+                    "--no-zygote",
+                    "--single-process",
+                    "--disable-gpu"
+                ],
+            ),
+            timeout=15.0  # Reduced timeout
         )
+        print("DEBUG: Browser launched successfully")
         context = await browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -246,8 +257,10 @@ async def picker_ws(websocket: WebSocket, token: str = Query(...)):
             viewport={"width": 1280, "height": 900},
             locale="en-US",
         )
+        print("DEBUG: Context created")
         await context.add_init_script(_STEALTH_JS)
         page = await context.new_page()
+        print("DEBUG: Page created, ready for navigation")
 
         await send({"type": "status", "message": "Ready. Send a navigate message."})
 
@@ -275,13 +288,18 @@ async def picker_ws(websocket: WebSocket, token: str = Query(...)):
                     continue
                 await send({"type": "status", "message": f"Loading {url}..."})
                 try:
+                    print(f"DEBUG: Navigating to {url}")
                     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    print("DEBUG: Page loaded, waiting 2.5 seconds...")
                     await page.wait_for_timeout(2500)
+                    print("DEBUG: Taking screenshot...")
                     img = await screenshot_b64()
                     vp = page.viewport_size or {"width": 1280, "height": 900}
                     await send({"type": "screenshot", "data": img,
                                 "width": vp["width"], "height": vp["height"]})
+                    print("DEBUG: Screenshot sent")
                 except Exception as e:
+                    print(f"DEBUG: Navigation failed: {e}")
                     await send({"type": "error", "message": f"Navigation failed: {str(e)[:200]}"})
 
             elif mtype == "hover":
@@ -369,8 +387,14 @@ async def picker_ws(websocket: WebSocket, token: str = Query(...)):
                         await send({"type": "validated", "selector": selector,
                                     "value": None, "stable": False,
                                     "message": "Selector did not match after reload — it may be unstable."})
+                except asyncio.TimeoutError:
+                    await send({"type": "error", "message": "Browser launch timed out. Server may be low on resources or Playwright not properly installed."})
+                    await websocket.close()
+                    return
                 except Exception as e:
-                    await send({"type": "error", "message": f"Validation failed: {str(e)[:200]}"})
+                    await send({"type": "error", "message": f"Failed to start browser: {str(e)[:200]}"})
+                    await websocket.close()
+                    return
 
             elif mtype == "close":
                 break
@@ -378,6 +402,8 @@ async def picker_ws(websocket: WebSocket, token: str = Query(...)):
             else:
                 await send({"type": "error", "message": f"Unknown message type: {mtype}"})
 
+    except Exception as e:
+        await send({"type": "error", "message": f"Failed to start browser: {str(e)[:200]}"})
     except WebSocketDisconnect:
         pass
     except Exception as e:
