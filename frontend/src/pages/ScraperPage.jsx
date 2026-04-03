@@ -575,6 +575,12 @@ function MonitorModal({ onClose, onSave, initial }) {
                   </div>
                 )}
 
+                <div>
+                  <label className="label">Selector</label>
+                  <input className="input font-mono text-sm" value={form.selector} onChange={set('selector')}
+                    placeholder={selType?.placeholder} />
+                </div>
+
                 {form.selector_type === 'css' && (
                   <div>
                     <label className="label">
@@ -585,12 +591,6 @@ function MonitorModal({ onClose, onSave, initial }) {
                       placeholder="value, href, data-price" />
                   </div>
                 )}
-
-                <div>
-                  <label className="label">Selector</label>
-                  <input className="input font-mono text-sm" value={form.selector} onChange={set('selector')}
-                    placeholder={selType?.placeholder} />
-                </div>
 
                 {/* Selector tips */}
                 <p className="text-[11px] rounded-lg px-3 py-2"
@@ -630,6 +630,40 @@ function MonitorModal({ onClose, onSave, initial }) {
                 )}
               </div>
 
+              {/* Separate monitor selector */}
+              <div className="rounded-xl p-4 space-y-3"
+                style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>Separate monitor element</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                      Use a different selector to compare the condition, while extracting data from the main selector
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer shrink-0">
+                    <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
+                      checked={form.use_monitor_selector} onChange={setChk('use_monitor_selector')} />
+                    <span className="text-sm" style={{ color: 'var(--foreground)' }}>Enable</span>
+                  </label>
+                </div>
+                {form.use_monitor_selector && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="label">Monitor selector type</label>
+                      <select className="input" value={form.monitor_selector_type}
+                        onChange={set('monitor_selector_type')}>
+                        {SELECTOR_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Monitor selector</label>
+                      <input className="input font-mono text-sm" value={form.monitor_selector}
+                        onChange={set('monitor_selector')} placeholder=".price-display" />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Playwright toggle */}
               <div className="rounded-xl p-4 space-y-3"
                 style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
@@ -643,7 +677,7 @@ function MonitorModal({ onClose, onSave, initial }) {
                   <label className="flex items-center gap-2 cursor-pointer shrink-0">
                     <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
                       checked={form.use_playwright} onChange={setChk('use_playwright')} />
-                    <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>Enable</span>
+                    <span className="text-sm" style={{ color: 'var(--foreground)' }}>Enable</span>
                   </label>
                 </div>
                 {form.use_playwright && (
@@ -867,40 +901,6 @@ function MonitorModal({ onClose, onSave, initial }) {
                 Each check retries up to <strong>{form.retry_attempts}</strong> times with a{' '}
                 <strong>{form.timeout_seconds}s</strong> timeout.
               </p>
-
-              {/* Optional: separate monitor vs extract selector */}
-              <div className="rounded-xl p-4 space-y-3"
-                style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>Separate monitor element</p>
-                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                      Use a different selector to compare the condition, while extracting data from the main selector
-                    </p>
-                  </div>
-                  <label className="flex items-center gap-2 cursor-pointer shrink-0">
-                    <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
-                      checked={form.use_monitor_selector} onChange={setChk('use_monitor_selector')} />
-                    <span className="text-sm" style={{ color: 'var(--foreground)' }}>Enable</span>
-                  </label>
-                </div>
-                {form.use_monitor_selector && (
-                  <div className="space-y-3">
-                    <div>
-                      <label className="label">Monitor selector type</label>
-                      <select className="input" value={form.monitor_selector_type}
-                        onChange={set('monitor_selector_type')}>
-                        {SELECTOR_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="label">Monitor selector</label>
-                      <input className="input font-mono text-sm" value={form.monitor_selector}
-                        onChange={set('monitor_selector')} placeholder=".price-display" />
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           )}
         </div>
