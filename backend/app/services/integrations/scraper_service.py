@@ -53,16 +53,20 @@ Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
 
 async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
                           wait_selector: Optional[str] = None,
-                          wait_ms: int = 3000) -> str:
+                          wait_ms: int = 8000) -> str:
     """
     Fetch page using Playwright in a subprocess to avoid Windows asyncio limitations.
     Falls back to static fetch if subprocess fails.
     """
     try:
         # Try subprocess approach first
+        logger.info(f"_fetch_dynamic: Starting subprocess Playwright for {url} (wait_ms: {wait_ms})")
         html = await _fetch_dynamic_subprocess(url, user_agent, wait_selector, wait_ms)
         if html:
+            logger.info(f"_fetch_dynamic: Subprocess Playwright succeeded, got {len(html)} characters")
             return html
+        else:
+            logger.warning("_fetch_dynamic: Subprocess returned empty HTML")
     except Exception as e:
         logger.warning(f"Subprocess Playwright failed: {e} - falling back to static")
     
@@ -70,61 +74,63 @@ async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
     return await _fetch_static(url, user_agent)
 
 
+# Global function for subprocess (can't be local function)
+def playwright_process(conn, url, user_agent, wait_selector, wait_ms):
+    """Playwright execution in separate process."""
+    try:
+        from playwright.sync_api import sync_playwright
+        
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-extensions", "--no-first-run", "--disable-default-apps",
+                ],
+            )
+            context = browser.new_context(
+                user_agent=user_agent or DEFAULT_UA,
+                viewport={"width": 1280, "height": 900},
+                locale="en-US",
+                timezone_id="America/New_York",
+                java_script_enabled=True,
+                accept_downloads=False,
+            )
+            context.add_init_script(_STEALTH_JS)
+            page = context.new_page()
+            
+            # Block media files
+            page.route("**/*.{mp4,mp3,avi,webm,ogg}", lambda r: r.abort())
+            
+            # Navigate to page
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            
+            # Wait for content
+            if wait_selector:
+                try:
+                    page.wait_for_selector(wait_selector, timeout=10000)
+                except Exception:
+                    pass
+            else:
+                page.wait_for_timeout(wait_ms)
+            
+            # Get HTML
+            html = page.content()
+            conn.send(("success", html))
+            
+    except Exception as e:
+        conn.send(("error", str(e)))
+    finally:
+        conn.close()
+
+
 async def _fetch_dynamic_subprocess(url: str, user_agent: Optional[str] = None,
                                    wait_selector: Optional[str] = None,
-                                   wait_ms: int = 3000) -> str:
+                                   wait_ms: int = 8000) -> str:
     """Run Playwright in subprocess to avoid Windows asyncio issues."""
     import multiprocessing
     import asyncio
-    
-    def playwright_process(conn, url, user_agent, wait_selector, wait_ms):
-        """Playwright execution in separate process."""
-        try:
-            from playwright.sync_api import sync_playwright
-            
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-extensions", "--no-first-run", "--disable-default-apps",
-                    ],
-                )
-                context = browser.new_context(
-                    user_agent=user_agent or DEFAULT_UA,
-                    viewport={"width": 1280, "height": 900},
-                    locale="en-US",
-                    timezone_id="America/New_York",
-                    java_script_enabled=True,
-                    accept_downloads=False,
-                )
-                context.add_init_script(_STEALTH_JS)
-                page = context.new_page()
-                
-                # Block media files
-                page.route("**/*.{mp4,mp3,avi,webm,ogg}", lambda r: r.abort())
-                
-                # Navigate to page
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                
-                # Wait for content
-                if wait_selector:
-                    try:
-                        page.wait_for_selector(wait_selector, timeout=10000)
-                    except Exception:
-                        pass
-                else:
-                    page.wait_for_timeout(wait_ms)
-                
-                # Get HTML
-                html = page.content()
-                conn.send(("success", html))
-                
-        except Exception as e:
-            conn.send(("error", str(e)))
-        finally:
-            conn.close()
     
     # Create subprocess
     parent_conn, child_conn = multiprocessing.Pipe()
@@ -170,30 +176,42 @@ def _should_use_playwright(html: str, url: str) -> bool:
 
 
 async def fetch_page(monitor: ScraperMonitor) -> tuple:
+    """Fetch page using unified PageFetcher service"""
+    from app.services.integrations.web_scraping import PageFetcher
+    
     use_playwright = getattr(monitor, "use_playwright", False)
     timeout = getattr(monitor, "timeout_seconds", 30) or 30
-
-    if use_playwright:
-        html = await _fetch_dynamic(
-            monitor.url,
-            user_agent=monitor.user_agent,
-            wait_selector=monitor.wait_selector if hasattr(monitor, "wait_selector") else None,
-            wait_ms=getattr(monitor, "wait_ms", 3000),
-        )
-        return html, "playwright"
-
-    html = await _fetch_static(monitor.url, monitor.user_agent, monitor.extra_headers, timeout)
-
-    if _should_use_playwright(html, monitor.url):
-        logger.info(f"Monitor {monitor.id}: JS framework detected — retrying with Playwright")
-        try:
-            html = await _fetch_dynamic(monitor.url, monitor.user_agent, wait_ms=3000)
-            return html, "playwright"
-        except Exception as e:
-            logger.warning(f"Playwright auto-upgrade failed: {e} — using static HTML")
-            return html, "static_fallback"
-
-    return html, "static"
+    
+    result = await PageFetcher.fetch(
+        url=monitor.url,
+        use_playwright=use_playwright,
+        wait_selector=getattr(monitor, "wait_selector", None),
+        wait_ms=getattr(monitor, "wait_ms", 3000),
+        user_agent=monitor.user_agent,
+        extra_headers=monitor.extra_headers,
+        timeout=timeout
+    )
+    
+    if result.error:
+        # Auto-upgrade logic for JS detection
+        if not use_playwright and _should_use_playwright(result.html, monitor.url):
+            logger.info(f"Monitor {monitor.id}: JS framework detected — retrying with Playwright")
+            try:
+                playwright_result = await PageFetcher.fetch(
+                    url=monitor.url,
+                    use_playwright=True,
+                    wait_ms=3000,
+                    user_agent=monitor.user_agent
+                )
+                return playwright_result.html, "playwright"
+            except Exception as e:
+                logger.warning(f"Playwright auto-upgrade failed: {e} — using static HTML")
+                return result.html, "static_fallback"
+        
+        # Return error if fetch failed completely
+        raise RuntimeError(f"Failed to fetch page: {result.error}")
+    
+    return result.html, result.method
 
 
 # ── Numeric helper ────────────────────────────────────────────────────────────
@@ -390,6 +408,8 @@ def _check_condition(value: Optional[str], operator: Optional[str],
 
 async def _do_check(monitor: ScraperMonitor) -> tuple:
     """Returns (value, monitor_value, error, duration_ms, retry_num, fetch_method)"""
+    from app.services.integrations.web_scraping import ElementExtractor
+    
     start = time.monotonic()
     retry_attempts = getattr(monitor, "retry_attempts", 3) or 1
     last_err = None
@@ -397,15 +417,28 @@ async def _do_check(monitor: ScraperMonitor) -> tuple:
     for attempt in range(max(1, retry_attempts)):
         try:
             html, fetch_method = await fetch_page(monitor)
-            extract_selector = monitor.selector
-            extract_selector_type = monitor.selector_type
-            monitor_sel = getattr(monitor, "monitor_selector", None)
-            value = _extract(html, extract_selector_type, extract_selector, monitor.attribute)
-
+            
+            # Extract primary value
+            extract_result = ElementExtractor.extract(
+                html=html,
+                selector_type=monitor.selector_type,
+                selector=monitor.selector,
+                attribute=monitor.attribute
+            )
+            value = extract_result.value
+            
+            # Extract monitor value (if separate monitor selector is set)
             monitor_value = value
+            monitor_sel = getattr(monitor, "monitor_selector", None)
             if monitor_sel:
-                mon_st = getattr(monitor, "monitor_selector_type", None) or extract_selector_type
-                monitor_value = _extract(html, mon_st, monitor_sel, None)
+                mon_st = getattr(monitor, "monitor_selector_type", None) or monitor.selector_type
+                monitor_result = ElementExtractor.extract(
+                    html=html,
+                    selector_type=mon_st,
+                    selector=monitor_sel,
+                    attribute=None
+                )
+                monitor_value = monitor_result.value
 
             duration_ms = int((time.monotonic() - start) * 1000)
             return value, monitor_value, None, duration_ms, attempt, fetch_method

@@ -53,7 +53,7 @@ const EMPTY_FORM = {
   name: '', url: '', selector_type: 'css', selector: '', attribute: '',
   monitor_selector: '', monitor_selector_type: 'css',
   use_monitor_selector: false,
-  use_playwright: false, wait_selector: '', wait_ms: 2000,
+  use_playwright: false, wait_selector: '', wait_ms: 8000,
   condition_operator: 'changed', condition_value: '',
   // Monitor behavior after condition met
   stop_on_condition_met: true,  // Stop after first alert

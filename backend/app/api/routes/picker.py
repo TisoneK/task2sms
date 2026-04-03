@@ -40,6 +40,9 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from jose import JWTError, jwt
 from app.core.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["picker"])
 
@@ -52,38 +55,101 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="picker")
 _SELECTOR_JS = """
 (el) => {
     function stableClasses(node) {
+        // Less aggressive filtering - keep more stable classes
         const skip = /^(a-[a-z]-|aok-|a-ws-|injected|active|hover|focus|selected|disabled|hidden|show|fade)/;
         return Array.from(node.classList)
             .filter(c => c.length > 2 && !skip.test(c) && !/\\d{4,}/.test(c))
-            .slice(0, 3);
+            .slice(0, 4);  // Keep more classes for better matching
     }
 
     function selectorForNode(node) {
+        // Priority 1: ID (most stable)
         if (node.id && !node.id.match(/^\\d|:/)) {
             return '#' + CSS.escape(node.id);
         }
+        
+        // Priority 2: Data attributes (very stable)
         const dataAttrs = Array.from(node.attributes)
             .filter(a => a.name.startsWith('data-') && a.name !== 'data-v' && a.value)
-            .slice(0, 1);
+            .slice(0, 2);  // Take first 2 for better matching
         if (dataAttrs.length) {
             return node.tagName.toLowerCase() + '[' + dataAttrs[0].name + '="' + dataAttrs[0].value + '"]';
         }
+        
+        // Priority 3: Test ID or test attributes
+        const testId = node.getAttribute('data-testid');
+        if (testId && !testId.match(/^\\d|:/)) {
+            return '[data-testid="' + CSS.escape(testId) + '"]';
+        }
+        
+        // Priority 4: Classes (more permissive)
         const classes = stableClasses(node);
-        if (classes.length) return '.' + classes.join('.');
+        if (classes.length) {
+            // Try class combinations for better matching
+            const classSelectors = [];
+            for (let i = 1; i <= Math.min(classes.length, 3); i++) {
+                classSelectors.push('.' + classes.slice(0, i).join('.'));
+            }
+            return classSelectors.join(' ');
+        }
+        
+        // Priority 5: Tag name (last resort)
         return node.tagName.toLowerCase();
     }
 
     const path = [];
     let current = el;
     let depth = 0;
-    while (current && current !== document.body && depth < 5) {
+    
+    while (current && current !== document.body && depth < 6) {  // Increased depth for complex sites
         path.unshift(selectorForNode(current));
-        if (document.querySelectorAll(path.join(' ')).length === 1) break;
+        
+        // Check if current path works - if so, break early
+        const currentPath = path.join(' ');
+        if (document.querySelectorAll(currentPath).length === 1) {
+            break;
+        }
+        
         current = current.parentElement;
         depth++;
     }
 
-    const selector = path.join(' ');
+    // If no unique selector found, try broader approaches
+    let selector = path.join(' ');
+    
+    // Fallback 1: Try tag-based selectors
+    if (document.querySelectorAll(selector).length !== 1) {
+        // Try with just tag name + one class
+        const tagName = el.tagName.toLowerCase();
+        const primaryClass = Array.from(el.classList).find(c => c.length > 3 && !/\\d{4,}/.test(c));
+        if (primaryClass) {
+            selector = tagName + '.' + primaryClass;
+        }
+        
+        // Fallback 2: Try with data-testid
+        const testId = el.getAttribute('data-testid');
+        if (testId) {
+            selector = '[data-testid="' + CSS.escape(testId) + '"]';
+        }
+        
+        // Fallback 3: Try container-based selector
+        if (document.querySelectorAll(selector).length !== 1) {
+            let parent = el.parentElement;
+            let attempts = 0;
+            while (parent && attempts < 3) {
+                const parentClasses = Array.from(parent.classList)
+                    .filter(c => c.length > 2 && !/\\d{4,}/.test(c))
+                    .slice(0, 2);
+                if (parentClasses.length > 0) {
+                    selector = parent.tagName.toLowerCase() + '.' + parentClasses.join('.');
+                    if (document.querySelectorAll(selector).length === 1) break;
+                }
+                parent = parent.parentElement;
+                attempts++;
+            }
+        }
+    }
+
     const matches = document.querySelectorAll(selector);
     return { selector, matchCount: matches.length };
 }
@@ -294,7 +360,40 @@ def _run_playwright_subprocess(conn):
                         element
                     )
                     selector = sel_result.get("selector", "") if sel_result else ""
-
+                    
+                    # Enhanced fallback if primary selector fails
+                    if not selector or page.evaluate(f"document.querySelectorAll('{selector}').length !== 1"):
+                        logger.warning(f"Primary selector failed, trying fallback strategies")
+                        
+                        # Fallback 1: Try broader data-testid patterns
+                        testId = element.get("testId") or element.get("id")
+                        if testId and not re.match(r'^\d|:', testId):
+                            fallback_selector = '[data-testid*="' + testId + '"]'
+                            if page.evaluate(f"document.querySelectorAll('{fallback_selector}').length === 1"):
+                                selector = fallback_selector
+                        
+                        # Fallback 2: Try text content matching
+                        if not selector:
+                            textContent = element.get("textContent") or ""
+                            if textContent:
+                                # Find elements with similar text content
+                                all_elements = page.evaluate("() => Array.from(document.querySelectorAll('*'))")
+                                matching_elements = []
+                                for elem in all_elements:
+                                    if elem.get("textContent") and textContent in elem.get("textContent"):
+                                        matching_elements.append(elem)
+                                if len(matching_elements) == 1:
+                                    # Generate selector for this unique element
+                                    elem_id = matching_elements[0].get("id")
+                                    elem_tag = matching_elements[0].get("tagName")
+                                    if elem_id and not re.match(r'^\d|:', elem_id):
+                                        selector = f'#{elem_id}'
+                                    else:
+                                        selector = elem_tag.lower()
+                        
+                        # Log final selector for debugging
+                        logger.info(f"Generated selector: {selector}")
+                    
                     value = None
                     if selector:
                         try:
