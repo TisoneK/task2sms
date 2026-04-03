@@ -55,6 +55,9 @@ const EMPTY_FORM = {
   use_monitor_selector: false,
   use_playwright: false, wait_selector: '', wait_ms: 2000,
   condition_operator: 'changed', condition_value: '',
+  // Monitor behavior after condition met
+  stop_on_condition_met: true,  // Stop after first alert
+  skip_initial_notification: true,  // Don't send alert on first run
   notify_channels: [], notify_recipients: [],
   message_template: 'Monitor alert: {name} — value is now {value}',
   webhook_url: '',
@@ -381,6 +384,9 @@ function MonitorModal({ onClose, onSave, initial }) {
         time_window_start:      form.time_window_start      || null,
         time_window_end:        form.time_window_end        || null,
         tags,
+        // Include new behavior fields
+        stop_on_condition_met: form.stop_on_condition_met,
+        skip_initial_notification: form.skip_initial_notification,
       })
       clearDraft()
       onClose()
@@ -394,7 +400,7 @@ function MonitorModal({ onClose, onSave, initial }) {
   const isEdit   = !!initial
 
   // Build dynamic preview using form.name and testResult value (not hardcoded)
-  const previewValue = testResult?.value || form.last_value || '—'
+  const previewValue = testResult?.value || form.last_value || 'Initializing...'
   const messagePreview = form.message_template
     ? form.message_template
         .replace(/\{name\}/g,      form.name || 'My Monitor')
@@ -715,6 +721,27 @@ function MonitorModal({ onClose, onSave, initial }) {
                 <p className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
                   For numeric comparisons, currency symbols and commas are stripped automatically
                   (e.g. "KES 1,598.02" → 1598.02)
+                </p>
+              </div>
+
+              {/* Monitor Behavior */}
+              <div className="space-y-3">
+                <label className="label">Monitor Behavior</label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
+                      checked={form.stop_on_condition_met} onChange={e => set('stop_on_condition_met')(e.target.checked)} />
+                    <span className="text-sm">Stop monitoring after condition is met (saves tokens)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
+                      checked={form.skip_initial_notification} onChange={e => set('skip_initial_notification')(e.target.checked)} />
+                    <span className="text-sm">Skip notification on first run (initial value check)</span>
+                  </label>
+                </div>
+                <p className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
+                  By default, monitors stop after first alert to save costs. 
+                  Disable to continue monitoring after each alert.
                 </p>
               </div>
             </div>
@@ -1221,7 +1248,14 @@ function MonitorCard({ m, onEdit, onDelete, onToggle, onCheck, onClone, checking
               {m.last_value !== null && m.last_value !== undefined && (
                 <span>
                   val: <span className="font-mono font-medium" style={{ color: 'var(--foreground)' }}>
-                    {m.last_value === '' ? <em>empty</em> : `"${String(m.last_value).slice(0, 40)}"`}
+                    {m.last_value === '' ? <em>empty</em> : 
+                     m.last_checked_at === null ? (
+                       <span className="flex items-center gap-1">
+                         <div className="w-3 h-3 rounded-full border-2 border-gray-300 border-t-blue-500 animate-spin border-t-transparent"></div>
+                         <em>Initializing...</em>
+                       </span>
+                     ) : 
+                     `"${String(m.last_value).slice(0, 40)}"`}
                   </span>
                 </span>
               )}
@@ -1319,16 +1353,25 @@ export default function ScraperPage() {
   }, [load])
 
   const handleSave = async form => {
-    if (editing) {
-      const { data } = await monitorsApi.update(editing.id, form)
-      setMonitors(ms => ms.map(m => m.id === editing.id ? data : m))
-      toast.success('Monitor updated')
-    } else {
-      const { data } = await monitorsApi.create(form)
-      setMonitors(ms => [data, ...ms])
-      toast.success('Monitor created')
+    try {
+      if (editing) {
+        const { data } = await monitorsApi.update(editing.id, form)
+        setMonitors(ms => ms.map(m => m.id === editing.id ? data : m))
+        toast.success('Monitor updated')
+      } else {
+        const { data } = await monitorsApi.create(form)
+        setMonitors(ms => [data, ...ms])
+        toast.success('Monitor created')
+      }
+      setEditing(null)
+    } catch (err) {
+      // Handle validation errors
+      if (err.response?.data?.error === 'Selector validation failed') {
+        toast.error(err.response.data.detail)
+      } else {
+        toast.error(err.response?.data?.detail || 'Failed to save monitor')
+      }
     }
-    setEditing(null)
   }
 
   const handleCheck = async m => {

@@ -31,6 +31,9 @@ class MonitorCreate(BaseModel):
     # Condition
     condition_operator: Optional[str] = None
     condition_value: Optional[str] = None
+    # Monitor behavior after condition met
+    stop_on_condition_met: bool = True  # Stop after first alert
+    skip_initial_notification: bool = True  # Don't send alert on first run
     # Notifications
     notify_channels: List[str] = []
     notify_recipients: List[str] = []
@@ -68,6 +71,9 @@ class MonitorUpdate(BaseModel):
     wait_ms: Optional[int] = None
     condition_operator: Optional[str] = None
     condition_value: Optional[str] = None
+    # Monitor behavior after condition met
+    stop_on_condition_met: Optional[bool] = None
+    skip_initial_notification: Optional[bool] = None
     notify_channels: Optional[List[str]] = None
     notify_recipients: Optional[List[str]] = None
     message_template: Optional[str] = None
@@ -155,6 +161,30 @@ async def list_monitors(db: AsyncSession = Depends(get_db),
 async def create_monitor(body: MonitorCreate,
                          db: AsyncSession = Depends(get_db),
                          current_user=Depends(get_current_user)):
+    # Validate selector before creating monitor
+    try:
+        from app.services.integrations.scraper_service import _fetch_static, _fetch_dynamic, _extract
+        
+        # Fetch the page to test selector
+        if body.use_playwright:
+            html = await _fetch_dynamic(body.url, wait_ms=body.wait_ms)
+        else:
+            html = await _fetch_static(body.url)
+        
+        # Test selector extraction
+        extracted_value = _extract(html, body.selector_type, body.selector, body.attribute)
+        if extracted_value is None:
+            return {
+                "error": "Selector validation failed",
+                "detail": f"The selector '{body.selector}' did not match any elements on the page. Please check the selector and try again."
+            }, 400
+            
+    except Exception as e:
+        return {
+            "error": "Selector validation failed", 
+            "detail": f"Could not validate selector: {str(e)}. The page may be inaccessible or the selector may be invalid."
+        }, 400
+    
     m = ScraperMonitor(user_id=current_user.id, **body.model_dump())
     db.add(m)
     await db.commit()
@@ -185,7 +215,42 @@ async def update_monitor(mid: int, body: MonitorUpdate,
     m = await get_monitor(db, mid, current_user.id)
     if not m:
         raise HTTPException(404, "Monitor not found")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    
+    # Validate selector if it's being updated
+    update_data = body.model_dump(exclude_unset=True)
+    if 'selector' in update_data or 'selector_type' in update_data or 'url' in update_data:
+        try:
+            from app.services.integrations.scraper_service import _fetch_static, _fetch_dynamic, _extract
+            
+            # Test with updated values
+            test_url = update_data.get('url', m.url)
+            test_selector = update_data.get('selector', m.selector)
+            test_selector_type = update_data.get('selector_type', m.selector_type)
+            test_attribute = update_data.get('attribute', m.attribute)
+            test_use_playwright = update_data.get('use_playwright', m.use_playwright)
+            test_wait_ms = update_data.get('wait_ms', m.wait_ms)
+            
+            # Fetch the page to test selector
+            if test_use_playwright:
+                html = await _fetch_dynamic(test_url, wait_ms=test_wait_ms)
+            else:
+                html = await _fetch_static(test_url)
+            
+            # Test selector extraction
+            extracted_value = _extract(html, test_selector_type, test_selector, test_attribute)
+            if extracted_value is None:
+                return {
+                    "error": "Selector validation failed",
+                    "detail": f"The selector '{test_selector}' did not match any elements on the page. Please check the selector and try again."
+                }, 400
+                
+        except Exception as e:
+            return {
+                "error": "Selector validation failed", 
+                "detail": f"Could not validate selector: {str(e)}. The page may be inaccessible or the selector may be invalid."
+            }, 400
+    
+    for k, v in update_data.items():
         setattr(m, k, v)
     await db.commit()
     await db.refresh(m)
@@ -333,14 +398,13 @@ async def test_selector(body: SelectorTestRequest,
     """Fire a one-off fetch+extract against any URL without saving a monitor."""
     import time
     from app.services.integrations.scraper_service import (
-        _fetch_static, _fetch_dynamic, _should_use_playwright, _extract
+        _fetch_static, _extract
     )
 
     start = time.monotonic()
     diagnosis = None
     value = None
     html = None
-    used_playwright = body.use_playwright
 
     # Coerce selector_type to enum if possible
     try:
@@ -349,14 +413,8 @@ async def test_selector(body: SelectorTestRequest,
         sel_type = body.selector_type  # js_expr falls through as plain string
 
     try:
-        if body.use_playwright:
-            html = await _fetch_dynamic(body.url, wait_ms=body.wait_ms)
-        else:
-            html = await _fetch_static(body.url)
-            if _should_use_playwright(html, body.url):
-                used_playwright = True
-                html = await _fetch_dynamic(body.url, wait_ms=body.wait_ms)
-
+        # Force static fetch only to avoid Windows subprocess issues
+        html = await _fetch_static(body.url)
         value = _extract(html, sel_type, body.selector, body.attribute)
         duration_ms = int((time.monotonic() - start) * 1000)
 
@@ -369,34 +427,31 @@ async def test_selector(body: SelectorTestRequest,
             else:
                 diagnosis = (
                     "Selector not found in page. "
-                    + ("Playwright was used — element wasn't present after render. "
-                       "Double-check the selector with browser DevTools."
-                       if used_playwright else
-                       "Try enabling Playwright if the page is JavaScript-rendered.")
+                    "The page was fetched statically (no JavaScript). "
+                    "If the page requires JavaScript, the selector may work in the actual monitor."
                 )
         elif value == "":
             diagnosis = (
                 "Element found but its text/value is empty. "
-                "For inputs leave Attribute blank (auto-reads .value). "
-                "Increase Wait time if content loads lazily."
+                "This might be a JavaScript-populated element."
             )
-        else:
-            diagnosis = "OK"
 
         return {
+            "success": value is not None and value != "",
             "value": value,
             "diagnosis": diagnosis,
-            "used_playwright": used_playwright,
             "duration_ms": duration_ms,
-            "error": None,
+            "used_playwright": False,
+            "html_preview": html[:500] + "..." if html and len(html) > 500 else html
         }
 
     except Exception as e:
-        duration_ms = int((time.monotonic() - start) * 1000)
+        logger.error(f"Selector test failed: {e}")
         return {
+            "success": False,
             "value": None,
-            "diagnosis": f"Fetch failed: {str(e)[:200]}",
-            "used_playwright": used_playwright,
-            "duration_ms": duration_ms,
-            "error": str(e)[:200],
+            "diagnosis": f"Test failed: {str(e)}",
+            "duration_ms": int((time.monotonic() - start) * 1000),
+            "used_playwright": False,
+            "html_preview": None
         }

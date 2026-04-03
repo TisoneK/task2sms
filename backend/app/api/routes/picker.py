@@ -31,6 +31,7 @@ import asyncio
 import base64
 import json
 import multiprocessing
+import queue
 import re
 import subprocess
 import sys
@@ -264,9 +265,33 @@ def _run_playwright_subprocess(conn):
                         conn.send({"type": "error", "message": "Could not identify element at that position."})
                         continue
 
+                    # Debug: Get the element first
+                    element = page.evaluate_handle(f"document.elementFromPoint({x}, {y})")
+                    if not element:
+                        conn.send({"type": "error", "message": "No element found at coordinates."})
+                        continue
+                    
+                    # Debug: Get element info
+                    element_info = page.evaluate("""
+                        (el) => {
+                            if (!el) return null;
+                            return {
+                                tagName: el.tagName,
+                                id: el.id,
+                                className: el.className,
+                                textContent: el.textContent ? el.textContent.substring(0, 100) : ''
+                            };
+                        }
+                    """, element)
+                    
+                    # Generate selector
+                    selector_js = _SELECTOR_JS.strip()
+                    if selector_js.startswith('(') and selector_js.endswith(')'):
+                        selector_js = selector_js[1:-1]  # Remove outer parentheses
+                    
                     sel_result = page.evaluate(
-                        f"(el) => ({_SELECTOR_JS.strip()[1:-1].strip()})(el)",
-                        page.evaluate_handle(f"document.elementFromPoint({x}, {y})")
+                        f"(el) => ({selector_js})(el)",
+                        element
                     )
                     selector = sel_result.get("selector", "") if sel_result else ""
 

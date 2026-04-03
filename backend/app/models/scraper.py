@@ -41,6 +41,10 @@ class ScraperMonitor(Base):
     # Condition
     condition_operator = Column(String(20), nullable=True)
     condition_value = Column(String(500), nullable=True)
+    
+    # Monitor behavior after condition met
+    stop_on_condition_met = Column(Boolean, default=True)  # Stop after first alert
+    skip_initial_notification = Column(Boolean, default=True)  # Don't send alert on first run
 
     # Notifications
     notify_channels = Column(JSON, default=list)

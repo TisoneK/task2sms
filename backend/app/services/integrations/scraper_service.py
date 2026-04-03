@@ -54,52 +54,101 @@ Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
 async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
                           wait_selector: Optional[str] = None,
                           wait_ms: int = 3000) -> str:
+    """
+    Fetch page using Playwright in a subprocess to avoid Windows asyncio limitations.
+    Falls back to static fetch if subprocess fails.
+    """
     try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        raise RuntimeError("Playwright is not installed. Run: playwright install chromium")
+        # Try subprocess approach first
+        html = await _fetch_dynamic_subprocess(url, user_agent, wait_selector, wait_ms)
+        if html:
+            return html
+    except Exception as e:
+        logger.warning(f"Subprocess Playwright failed: {e} - falling back to static")
+    
+    # Fallback to static fetch
+    return await _fetch_static(url, user_agent)
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-extensions", "--no-first-run", "--disable-default-apps",
-            ],
-        )
-        context = await browser.new_context(
-            user_agent=user_agent or DEFAULT_UA,
-            viewport={"width": 1280, "height": 900},
-            locale="en-US",
-            timezone_id="America/New_York",
-            java_script_enabled=True,
-            accept_downloads=False,
-        )
-        await context.add_init_script(_STEALTH_JS)
-        page = await context.new_page()
-        await page.route("**/*.{mp4,mp3,avi,webm,ogg}", lambda r: r.abort())
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-        if wait_selector:
-            try:
-                await page.wait_for_selector(wait_selector, timeout=10000)
-            except Exception:
-                pass
+async def _fetch_dynamic_subprocess(url: str, user_agent: Optional[str] = None,
+                                   wait_selector: Optional[str] = None,
+                                   wait_ms: int = 3000) -> str:
+    """Run Playwright in subprocess to avoid Windows asyncio issues."""
+    import multiprocessing
+    import asyncio
+    
+    def playwright_process(conn, url, user_agent, wait_selector, wait_ms):
+        """Playwright execution in separate process."""
+        try:
+            from playwright.sync_api import sync_playwright
+            
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-extensions", "--no-first-run", "--disable-default-apps",
+                    ],
+                )
+                context = browser.new_context(
+                    user_agent=user_agent or DEFAULT_UA,
+                    viewport={"width": 1280, "height": 900},
+                    locale="en-US",
+                    timezone_id="America/New_York",
+                    java_script_enabled=True,
+                    accept_downloads=False,
+                )
+                context.add_init_script(_STEALTH_JS)
+                page = context.new_page()
+                
+                # Block media files
+                page.route("**/*.{mp4,mp3,avi,webm,ogg}", lambda r: r.abort())
+                
+                # Navigate to page
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                
+                # Wait for content
+                if wait_selector:
+                    try:
+                        page.wait_for_selector(wait_selector, timeout=10000)
+                    except Exception:
+                        pass
+                else:
+                    page.wait_for_timeout(wait_ms)
+                
+                # Get HTML
+                html = page.content()
+                conn.send(("success", html))
+                
+        except Exception as e:
+            conn.send(("error", str(e)))
+        finally:
+            conn.close()
+    
+    # Create subprocess
+    parent_conn, child_conn = multiprocessing.Pipe()
+    process = multiprocessing.Process(
+        target=playwright_process,
+        args=(child_conn, url, user_agent, wait_selector, wait_ms),
+        daemon=True
+    )
+    process.start()
+    
+    try:
+        # Wait for result with timeout
+        if parent_conn.poll(timeout=45):  # 45 second timeout
+            status, result = parent_conn.recv()
+            if status == "success":
+                return result
+            else:
+                raise RuntimeError(f"Playwright process failed: {result}")
         else:
-            await page.wait_for_timeout(wait_ms)
-
-        await page.evaluate("""() => {
-            document.querySelectorAll('input, select, textarea').forEach(el => {
-                if (el.value !== undefined && el.value !== '') {
-                    el.setAttribute('value', el.value);
-                }
-            });
-        }""")
-
-        html = await page.content()
-        await browser.close()
-        return html
+            raise RuntimeError("Playwright process timed out")
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
 
 
 def _should_use_playwright(html: str, url: str) -> bool:
@@ -444,6 +493,18 @@ async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
     log = await check_monitor(db, monitor)
     if not log.condition_met:
         return log
+
+    # Check if this is the first run and we should skip notification
+    is_first_run = monitor.last_checked_at is None
+    if is_first_run and getattr(monitor, 'skip_initial_notification', True):
+        logger.info(f"Monitor {monitor.id}: Skipping initial notification (first run)")
+        return log
+
+    # Check if monitor should stop after condition met
+    if getattr(monitor, 'stop_on_condition_met', True):
+        monitor.status = MonitorStatus.PAUSED
+        monitor.error_message = "Automatically paused after condition was met"
+        logger.info(f"Monitor {monitor.id}: Auto-paused after condition met")
 
     context = {
         "name": monitor.name,
