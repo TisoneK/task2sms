@@ -427,7 +427,13 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
             monitor.error_message = None
             monitor.status = MonitorStatus.ACTIVE
             monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
-            monitor.success_count = (getattr(monitor, "success_count", 0) or 0) + 1
+            
+            # Only count as success if condition was actually met
+            if condition_met:
+                monitor.success_count = (getattr(monitor, "success_count", 0) or 0) + 1
+            else:
+                monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
+                
             monitor.consecutive_failures = 0
 
     await db.commit()

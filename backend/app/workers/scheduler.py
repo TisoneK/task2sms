@@ -106,18 +106,19 @@ async def _run_monitor(monitor_id: int):
                 logger.error(f"Monitor {monitor_id} run error: {e}")
             finally:
                 # Always update next_run_at after a run (even on error)
-                await _update_next_run(db, monitor_id)
+                await _update_next_run(monitor_id)
 
 
-async def _update_next_run(db, monitor_id: int):
+async def _update_next_run(monitor_id: int):
     """Store next_run_at on the monitor for the frontend countdown."""
-    job = scheduler.get_job(f"monitor_{monitor_id}")
-    if job and job.next_run_time:
-        result = await db.execute(select(ScraperMonitor).where(ScraperMonitor.id == monitor_id))
-        monitor = result.scalar_one_or_none()
-        if monitor:
-            monitor.next_run_at = job.next_run_time
-            await db.commit()
+    async with AsyncSessionLocal() as db:
+        job = scheduler.get_job(f"monitor_{monitor_id}")
+        if job and job.next_run_time:
+            result = await db.execute(select(ScraperMonitor).where(ScraperMonitor.id == monitor_id))
+            monitor = result.scalar_one_or_none()
+            if monitor:
+                monitor.next_run_at = job.next_run_time
+                await db.commit()
 
 
 def schedule_monitor(monitor: ScraperMonitor):
@@ -144,7 +145,7 @@ def schedule_monitor(monitor: ScraperMonitor):
         trigger = IntervalTrigger(seconds=interval_secs)
 
     # Respect last_checked_at to avoid immediate re-runs ONLY if the due time
-    # is still in the future. If we're past due, run immediately (next_run=None).
+    # is still in the future. If we're past due, run immediately.
     next_run = None
     if monitor.last_checked_at:
         interval_secs = _monitor_interval_seconds(monitor)
@@ -155,12 +156,15 @@ def schedule_monitor(monitor: ScraperMonitor):
         # Only defer if there's more than 5 seconds remaining (avoids double-run on restart)
         if due_at > now + timedelta(seconds=5):
             next_run = due_at
-        # else: next_run stays None → APScheduler fires immediately
+        # else: next_run stays None → APScheduler will calculate next run based on interval
+    else:
+        # For new monitors, let APScheduler calculate the next run time automatically
+        next_run = None
 
     scheduler.add_job(
         _run_monitor, trigger, args=[monitor.id], id=job_id,
         replace_existing=True,
-        next_run_time=next_run,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=5),  # Start 5 seconds from now
     )
 
     # Write next_run_at onto the in-memory object so the caller can commit it

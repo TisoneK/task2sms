@@ -129,13 +129,26 @@ def _out(m: ScraperMonitor) -> dict:
         "max_failures_before_pause": getattr(m, "max_failures_before_pause", 10),
         "tags": getattr(m, "tags", None) or [],
         "created_at": m.created_at,
+        "last_condition_met": None,  # Will be populated below
     }
 
 
 @router.get("")
 async def list_monitors(db: AsyncSession = Depends(get_db),
                         current_user=Depends(get_current_user)):
-    return [_out(m) for m in await get_monitors(db, current_user.id)]
+    monitors = []
+    for m in await get_monitors(db, current_user.id):
+        monitor_data = _out(m)
+        # Get latest condition_met status
+        from sqlalchemy import select, text
+        result = await db.execute(
+            text("SELECT condition_met FROM scraper_check_logs WHERE monitor_id = :mid ORDER BY checked_at DESC LIMIT 1"),
+            {"mid": m.id}
+        )
+        latest_condition = result.scalar_one_or_none()
+        monitor_data["last_condition_met"] = latest_condition
+        monitors.append(monitor_data)
+    return monitors
 
 
 @router.post("", status_code=201)
@@ -269,9 +282,13 @@ async def monitor_logs(mid: int, limit: int = 100,
         raise HTTPException(404, "Monitor not found")
     logs = await get_check_logs(db, mid, limit)
     return [{
-        "id": l.id, "value_found": l.value_found, "prev_value": getattr(l, "prev_value", None),
+        "id": l.id, 
+        "value_found": l.value_found, 
+        "prev_value": getattr(l, "prev_value", None),
         "condition_met": l.condition_met,
-        "alerted": l.alerted, "error": l.error, "checked_at": l.checked_at,
+        "alerted": l.alerted, 
+        "error": l.error, 
+        "checked_at": l.checked_at,
         "duration_ms": getattr(l, "duration_ms", None),
         "fetch_method": getattr(l, "fetch_method", None),
     } for l in logs]

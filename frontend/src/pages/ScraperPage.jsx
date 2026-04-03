@@ -1161,7 +1161,7 @@ function MonitorCard({ m, onEdit, onDelete, onToggle, onCheck, onClone, checking
               <span className={`${sc.badge} text-[10px] shrink-0`}>{m.status}</span>
               {m.use_playwright && <span className="badge-purple text-[10px] shrink-0">playwright</span>}
               {(m.notify_channels || []).map(ch => (
-                <span key={ch} className="badge-gray text-[10px] capitalize shrink-0">{ch}</span>
+                <span key={ch} className="badge-gray text-[10px] shrink-0">{ch}</span>
               ))}
             </div>
 
