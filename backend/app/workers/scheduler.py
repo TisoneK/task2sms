@@ -143,7 +143,8 @@ def schedule_monitor(monitor: ScraperMonitor):
         interval_secs = _monitor_interval_seconds(monitor)
         trigger = IntervalTrigger(seconds=interval_secs)
 
-    # Respect last_checked_at to avoid immediate re-runs
+    # Respect last_checked_at to avoid immediate re-runs ONLY if the due time
+    # is still in the future. If we're past due, run immediately (next_run=None).
     next_run = None
     if monitor.last_checked_at:
         interval_secs = _monitor_interval_seconds(monitor)
@@ -151,8 +152,10 @@ def schedule_monitor(monitor: ScraperMonitor):
         now = datetime.now(timezone.utc)
         if due_at.tzinfo is None:
             due_at = due_at.replace(tzinfo=timezone.utc)
-        if due_at > now:
+        # Only defer if there's more than 5 seconds remaining (avoids double-run on restart)
+        if due_at > now + timedelta(seconds=5):
             next_run = due_at
+        # else: next_run stays None → APScheduler fires immediately
 
     scheduler.add_job(
         _run_monitor, trigger, args=[monitor.id], id=job_id,

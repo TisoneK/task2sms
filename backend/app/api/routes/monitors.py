@@ -5,6 +5,8 @@ from typing import List, Optional
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.scraper import SelectorType, MonitorStatus, ScraperMonitor
+# js_expr is a virtual selector type handled entirely in scraper_service
+_ALL_SELECTOR_TYPES = list(SelectorType) + ["js_expr"]
 from app.services.integrations.scraper_service import (
     get_monitors, get_monitor, check_monitor,
     run_monitor_and_notify, get_check_logs, delete_check_log, clear_check_logs
@@ -16,7 +18,7 @@ router = APIRouter(prefix="/monitors", tags=["web-monitor"])
 class MonitorCreate(BaseModel):
     name: str
     url: str
-    selector_type: SelectorType = SelectorType.CSS
+    selector_type: str = "css"   # css | xpath | text | regex | js_expr
     selector: str
     attribute: Optional[str] = None
     # Decouple monitor selector from extract selector
@@ -56,7 +58,7 @@ class MonitorCreate(BaseModel):
 class MonitorUpdate(BaseModel):
     name: Optional[str] = None
     url: Optional[str] = None
-    selector_type: Optional[SelectorType] = None
+    selector_type: Optional[str] = None   # css | xpath | text | regex | js_expr
     selector: Optional[str] = None
     attribute: Optional[str] = None
     monitor_selector: Optional[str] = None
@@ -85,9 +87,13 @@ class MonitorUpdate(BaseModel):
 
 
 def _out(m: ScraperMonitor) -> dict:
+    # selector_type may be SelectorType enum or plain string (js_expr)
+    sel_type = m.selector_type
+    if hasattr(sel_type, 'value'):
+        sel_type = sel_type.value
     return {
         "id": m.id, "name": m.name, "url": m.url,
-        "selector_type": m.selector_type, "selector": m.selector,
+        "selector_type": sel_type, "selector": m.selector,
         "attribute": m.attribute,
         "monitor_selector": getattr(m, "monitor_selector", None),
         "monitor_selector_type": getattr(m, "monitor_selector_type", None),
@@ -297,7 +303,7 @@ async def clear_logs(mid: int,
 
 class SelectorTestRequest(BaseModel):
     url: str
-    selector_type: SelectorType = SelectorType.CSS
+    selector_type: str = "css"   # css | xpath | text | regex | js_expr
     selector: str
     attribute: Optional[str] = None
     use_playwright: bool = False
@@ -307,8 +313,7 @@ class SelectorTestRequest(BaseModel):
 @router.post("/test-selector")
 async def test_selector(body: SelectorTestRequest,
                         current_user=Depends(get_current_user)):
-    """Fire a one-off fetch+extract against any URL without saving a monitor.
-    Returns the extracted value (or null) plus a human-readable diagnosis."""
+    """Fire a one-off fetch+extract against any URL without saving a monitor."""
     import time
     from app.services.integrations.scraper_service import (
         _fetch_static, _fetch_dynamic, _should_use_playwright, _extract
@@ -320,6 +325,12 @@ async def test_selector(body: SelectorTestRequest,
     html = None
     used_playwright = body.use_playwright
 
+    # Coerce selector_type to enum if possible
+    try:
+        sel_type = SelectorType(body.selector_type)
+    except ValueError:
+        sel_type = body.selector_type  # js_expr falls through as plain string
+
     try:
         if body.use_playwright:
             html = await _fetch_dynamic(body.url, wait_ms=body.wait_ms)
@@ -329,22 +340,28 @@ async def test_selector(body: SelectorTestRequest,
                 used_playwright = True
                 html = await _fetch_dynamic(body.url, wait_ms=body.wait_ms)
 
-        value = _extract(html, body.selector_type, body.selector, body.attribute)
+        value = _extract(html, sel_type, body.selector, body.attribute)
         duration_ms = int((time.monotonic() - start) * 1000)
 
         if value is None:
-            diagnosis = (
-                "Selector not found in page. "
-                + ("Playwright was used — the page rendered but the element wasn't present. "
-                   "Double-check the selector with browser DevTools."
-                   if used_playwright else
-                   "Try enabling Playwright if the page is JavaScript-rendered.")
-            )
+            if body.selector_type == "js_expr":
+                diagnosis = (
+                    "JS expression returned no value. Check that each css('...') "
+                    "selector matches an element and the text is numeric."
+                )
+            else:
+                diagnosis = (
+                    "Selector not found in page. "
+                    + ("Playwright was used — element wasn't present after render. "
+                       "Double-check the selector with browser DevTools."
+                       if used_playwright else
+                       "Try enabling Playwright if the page is JavaScript-rendered.")
+                )
         elif value == "":
             diagnosis = (
                 "Element found but its text/value is empty. "
-                "For inputs try leaving Attribute blank (auto-reads .value). "
-                "For other elements check if the content loads after a delay — increase Wait time."
+                "For inputs leave Attribute blank (auto-reads .value). "
+                "Increase Wait time if content loads lazily."
             )
         else:
             diagnosis = "OK"

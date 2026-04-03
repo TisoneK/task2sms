@@ -4,8 +4,8 @@ import { monitorsApi } from '../services/api'
 import {
   Plus, Trash2, Play, Globe, X, ChevronDown, ChevronUp,
   AlertCircle, CheckCircle2, Clock, Pause, Copy, Tag,
-  Download, Filter, RefreshCw, Settings2, Zap, Timer,
-  MoreHorizontal, CheckSquare, XSquare
+  Download, RefreshCw, Settings2, Zap, Timer,
+  MoreHorizontal, Code2, Info, BellRing
 } from 'lucide-react'
 import ConfirmModal from '../components/ui/ConfirmModal'
 import ElementPicker from '../components/ui/ElementPicker'
@@ -16,11 +16,13 @@ import toast from 'react-hot-toast'
 // ─── Constants ─────────────────────────────────────────────────────────────
 
 const SELECTOR_TYPES = [
-  { value: 'css',   label: 'CSS Selector',  placeholder: 'div.price, span#stock' },
-  { value: 'xpath', label: 'XPath',          placeholder: '//span[@class="price"]' },
-  { value: 'text',  label: 'Text Contains',  placeholder: 'out of stock' },
-  { value: 'regex', label: 'Regex',          placeholder: '\\$([\\d,.]+)' },
+  { value: 'css',     label: 'CSS Selector',     placeholder: 'div.price, span#stock' },
+  { value: 'xpath',   label: 'XPath',             placeholder: '//span[@class="price"]' },
+  { value: 'text',    label: 'Text Contains',     placeholder: 'out of stock' },
+  { value: 'regex',   label: 'Regex',             placeholder: '\\$([\\d,.]+)' },
+  { value: 'js_expr', label: 'JS Expression',     placeholder: "css('.price') + css('.tax')" },
 ]
+
 const OPERATORS = [
   { value: 'changed',      label: 'Changed (any change)' },
   { value: 'contains',     label: 'Contains text' },
@@ -29,14 +31,22 @@ const OPERATORS = [
   { value: 'gt',  label: '> greater' },  { value: 'gte', label: '≥ greater or equal' },
   { value: 'lt',  label: '< less' },     { value: 'lte', label: '≤ less or equal' },
 ]
+
 const CHANNELS = ['sms', 'email', 'whatsapp', 'telegram']
+
 const INTERVAL_UNITS = [
-  { value: 'seconds', label: 'Seconds', min: 1,   max: 3600  },
+  { value: 'seconds', label: 'Seconds', min: 10,  max: 3600  },
   { value: 'minutes', label: 'Minutes', min: 1,   max: 10080 },
   { value: 'hours',   label: 'Hours',   min: 1,   max: 168   },
   { value: 'days',    label: 'Days',    min: 1,   max: 30    },
 ]
-const STATUS_STYLE = { active: 'badge-green', paused: 'badge-yellow', error: 'badge-red' }
+
+const STATUS_COLOR = {
+  active: { dot: '#16a34a', badge: 'badge-green' },
+  paused: { dot: '#d97706', badge: 'badge-yellow' },
+  error:  { dot: '#dc2626', badge: 'badge-red' },
+}
+
 const PORTAL = () => document.getElementById('modal-root') || document.body
 
 const EMPTY_FORM = {
@@ -87,7 +97,7 @@ function exportLogsJSON(logs, monitorName) {
 }
 
 function exportLogsCSV(logs, monitorName) {
-  const cols = ['id', 'checked_at', 'value_found', 'prev_value', 'condition_met', 'alerted', 'error', 'duration_ms']
+  const cols = ['id', 'checked_at', 'value_found', 'prev_value', 'condition_met', 'alerted', 'error', 'duration_ms', 'fetch_method']
   const rows = [cols.join(',')]
   for (const l of logs) {
     rows.push(cols.map(c => {
@@ -106,7 +116,7 @@ function exportLogsCSV(logs, monitorName) {
   URL.revokeObjectURL(url)
 }
 
-// ─── MonitorModal (Wizard) ────────────────────────────────────────────────
+// ─── Wizard ────────────────────────────────────────────────────────────────
 
 const DRAFT_KEY = 'monitor_draft'
 
@@ -137,31 +147,26 @@ function validateStep(step, form, recipientInput) {
   return null
 }
 
+// Contact autocomplete input
 function ContactInput({ recipientInput, setRecipientInput, contacts }) {
-  const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState([])
   const [focused, setFocused] = useState(false)
   const timerRef = useRef(null)
 
-  // Debounced suggestion filter
   const handleChange = (e) => {
     const val = e.target.value
     setRecipientInput(val)
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
-      // Find the segment being typed (last comma-separated chunk)
       const parts = val.split(',')
       const current = parts[parts.length - 1].trim()
-      setQuery(current)
       if (current.length < 1) { setSuggestions([]); return }
       const q = current.toLowerCase()
       setSuggestions(
-        contacts
-          .filter(c =>
-            c.value.toLowerCase().includes(q) ||
-            (c.label && c.label.toLowerCase().includes(q))
-          )
-          .slice(0, 6)
+        contacts.filter(c =>
+          c.value.toLowerCase().includes(q) ||
+          (c.label && c.label.toLowerCase().includes(q))
+        ).slice(0, 6)
       )
     }, 150)
   }
@@ -171,10 +176,9 @@ function ContactInput({ recipientInput, setRecipientInput, contacts }) {
     parts[parts.length - 1] = contact.value
     setRecipientInput(parts.filter(Boolean).join(', ') + ', ')
     setSuggestions([])
-    setQuery('')
   }
 
-  const alreadySelected = recipientInput.split(',').map(s => s.trim()).filter(Boolean)
+  const selected = recipientInput.split(',').map(s => s.trim()).filter(Boolean)
 
   return (
     <div className="relative">
@@ -193,28 +197,28 @@ function ContactInput({ recipientInput, setRecipientInput, contacts }) {
           {suggestions.map(c => (
             <button key={c.id} type="button"
               onMouseDown={() => pick(c)}
-              className="w-full flex items-center justify-between px-3 py-2 text-sm text-left transition-colors"
+              className="w-full flex items-center justify-between px-3 py-2 text-sm text-left"
               style={{ borderBottom: '1px solid var(--border)' }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--muted)'}
               onMouseLeave={e => e.currentTarget.style.background = ''}>
               <span style={{ color: 'var(--foreground)' }}>{c.value}</span>
               <span className="text-xs ml-2 shrink-0" style={{ color: 'var(--muted-foreground)' }}>
-                {c.label || c.type}{c.use_count > 0 ? ` · used ${c.use_count}x` : ''}
+                {c.label || c.type}{c.use_count > 0 ? ` · ${c.use_count}x` : ''}
               </span>
             </button>
           ))}
         </div>
       )}
-      {alreadySelected.length > 0 && (
+      {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
-          {alreadySelected.map(v => (
+          {selected.map(v => (
             <span key={v} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
               style={{ background: 'var(--muted)', color: 'var(--foreground)', border: '1px solid var(--border)' }}>
               {v}
               <button type="button" onClick={() => {
-                const next = alreadySelected.filter(x => x !== v)
+                const next = selected.filter(x => x !== v)
                 setRecipientInput(next.join(', '))
-              }} style={{ color: 'var(--muted-foreground)', lineHeight: 1 }}>x</button>
+              }} style={{ color: 'var(--muted-foreground)' }}>×</button>
             </span>
           ))}
         </div>
@@ -222,6 +226,8 @@ function ContactInput({ recipientInput, setRecipientInput, contacts }) {
     </div>
   )
 }
+
+// ─── MonitorModal ────────────────────────────────────────────────────────
 
 function MonitorModal({ onClose, onSave, initial }) {
   const buildForm = (src) => {
@@ -242,7 +248,6 @@ function MonitorModal({ onClose, onSave, initial }) {
     }
   }
 
-  // Draft recovery — only for new monitors
   const [showDraftPrompt, setShowDraftPrompt] = useState(false)
   const [pendingDraft, setPendingDraft]       = useState(null)
 
@@ -261,8 +266,8 @@ function MonitorModal({ onClose, onSave, initial }) {
 
   const [form,           setForm]           = useState(initForm)
   const [recipientInput, setRecipientInput] = useState((initial?.notify_recipients || []).join(', '))
-  const [step,           setStep]           = useState(0)         // 0-3
-  const [maxStep,        setMaxStep]        = useState(initial ? 3 : 0)  // highest unlocked
+  const [step,           setStep]           = useState(0)
+  const [maxStep,        setMaxStep]        = useState(initial ? 3 : 0)
   const [stepError,      setStepError]      = useState(null)
   const [loading,        setLoading]        = useState(false)
   const [contacts,       setContacts]       = useState([])
@@ -270,25 +275,21 @@ function MonitorModal({ onClose, onSave, initial }) {
   const [testing,        setTesting]        = useState(false)
   const [showPicker,     setShowPicker]     = useState(false)
 
-  // Lock body scroll
   useEffect(() => {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = '' }
   }, [])
 
-  // Load contacts for autocomplete
   useEffect(() => {
     import('../services/api').then(({ contactsApi }) => {
       contactsApi.list().then(r => setContacts(r.data)).catch(() => {})
     })
   }, [])
 
-  // Persist draft to localStorage on every form change (new monitors only)
+  // Persist draft on change
   useEffect(() => {
     if (initial || showDraftPrompt) return
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ form, recipientInput, step }))
-    } catch {}
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ form, recipientInput, step })) } catch {}
   }, [form, recipientInput, step, initial, showDraftPrompt])
 
   const clearDraft = () => localStorage.removeItem(DRAFT_KEY)
@@ -313,9 +314,12 @@ function MonitorModal({ onClose, onSave, initial }) {
     try {
       const { monitorsApi } = await import('../services/api')
       const { data } = await monitorsApi.testSelector({
-        url: form.url, selector_type: form.selector_type,
-        selector: form.selector, attribute: form.attribute || null,
-        use_playwright: form.use_playwright, wait_ms: form.wait_ms || 3000,
+        url: form.url,
+        selector_type: form.selector_type,
+        selector: form.selector,
+        attribute: form.attribute || null,
+        use_playwright: form.use_playwright,
+        wait_ms: form.wait_ms || 3000,
       })
       setTestResult(data)
     } catch (err) {
@@ -323,17 +327,16 @@ function MonitorModal({ onClose, onSave, initial }) {
     } finally { setTesting(false) }
   }
 
-  const handlePickerSelect = ({ selector, value, value_type, suggested_operator, suggested_strip }) => {
+  const handlePickerSelect = ({ selector, value, value_type, suggested_operator }) => {
     setForm(f => ({
       ...f,
       selector,
       selector_type: 'css',
-      // If a numeric strip pattern was detected, pre-fill condition
       condition_operator: suggested_operator || f.condition_operator,
     }))
     setTestResult({
       value,
-      diagnosis: value ? 'OK — extracted from picker' : 'Element found but no text value',
+      diagnosis: value ? 'Extracted from picker' : 'Element found but no text value',
       used_playwright: true,
       duration_ms: null,
       error: null,
@@ -353,7 +356,7 @@ function MonitorModal({ onClose, onSave, initial }) {
   const goBack = () => { setStepError(null); setStep(s => s - 1) }
 
   const goTo = (idx) => {
-    if (idx > maxStep) return   // locked
+    if (idx > maxStep) return
     setStepError(null)
     setStep(idx)
   }
@@ -390,7 +393,17 @@ function MonitorModal({ onClose, onSave, initial }) {
   const unitInfo = INTERVAL_UNITS.find(u => u.value === form.check_interval_unit) || INTERVAL_UNITS[1]
   const isEdit   = !!initial
 
-  // ── Draft prompt overlay ──────────────────────────────────────────────────
+  // Build dynamic preview using form.name and testResult value (not hardcoded)
+  const previewValue = testResult?.value || form.last_value || '—'
+  const messagePreview = form.message_template
+    ? form.message_template
+        .replace(/\{name\}/g,      form.name || 'My Monitor')
+        .replace(/\{value\}/g,     previewValue)
+        .replace(/\{prev_value\}/g,'—')
+        .replace(/\{url\}/g,       form.url || 'https://example.com')
+    : ''
+
+  // Draft prompt
   if (showDraftPrompt && pendingDraft) {
     return createPortal(
       <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
@@ -398,7 +411,7 @@ function MonitorModal({ onClose, onSave, initial }) {
         <div className="rounded-2xl p-6 w-full max-w-sm space-y-4"
           style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
           <h3 className="font-semibold text-[15px]" style={{ color: 'var(--foreground)' }}>
-            Resume previous setup?
+            Resume previous draft?
           </h3>
           <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
             You have an unfinished monitor draft. Continue where you left off?
@@ -425,11 +438,12 @@ function MonitorModal({ onClose, onSave, initial }) {
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4"
       style={{ background: 'rgba(0,0,0,0.6)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+
       <div className="relative rounded-2xl w-full max-w-lg max-h-[96vh] overflow-hidden flex flex-col"
         style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-modal)' }}
         onClick={e => e.stopPropagation()}>
 
-        {/* ── Header ── */}
+        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 shrink-0"
           style={{ borderBottom: '1px solid var(--border)' }}>
           <div>
@@ -443,7 +457,7 @@ function MonitorModal({ onClose, onSave, initial }) {
           <button onClick={onClose} className="btn-ghost p-1.5"><X size={16} /></button>
         </div>
 
-        {/* ── Step indicator ── */}
+        {/* Step indicator */}
         <div className="flex shrink-0 px-5 py-3 gap-2"
           style={{ borderBottom: '1px solid var(--border)' }}>
           {STEPS.map((s, i) => {
@@ -463,7 +477,7 @@ function MonitorModal({ onClose, onSave, initial }) {
                 <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
                   style={{
                     background: completed ? '#16a34a' : active ? 'var(--primary)' : 'var(--muted)',
-                    color:      (completed || active) ? '#fff' : 'var(--muted-foreground)',
+                    color: (completed || active) ? '#fff' : 'var(--muted-foreground)',
                   }}>
                   {completed ? '✓' : i + 1}
                 </div>
@@ -476,7 +490,7 @@ function MonitorModal({ onClose, onSave, initial }) {
           })}
         </div>
 
-        {/* ── Step error banner ── */}
+        {/* Error banner */}
         {stepError && (
           <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-sm shrink-0"
             style={{ background: 'color-mix(in srgb, var(--destructive) 12%, transparent)',
@@ -485,10 +499,10 @@ function MonitorModal({ onClose, onSave, initial }) {
           </div>
         )}
 
-        {/* ── Step content ── */}
+        {/* Step content */}
         <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4 space-y-4">
 
-          {/* STEP 1 — BASIC */}
+          {/* ── STEP 1: BASIC ── */}
           {step === 0 && (
             <div className="space-y-4">
               <div>
@@ -503,15 +517,15 @@ function MonitorModal({ onClose, onSave, initial }) {
                   placeholder="https://example.com/product" />
               </div>
 
-              {/* Selector */}
+              {/* Selector section */}
               <div className="rounded-xl p-4 space-y-3"
                 style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wider"
-                      style={{ color: 'var(--muted-foreground)' }}>Element to extract</p>
+                      style={{ color: 'var(--muted-foreground)' }}>Element / Expression</p>
                     <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                      Click an element visually, or type a CSS selector manually
+                      Click "Pick" to select visually, or type a selector manually
                     </p>
                   </div>
                   <div className="flex gap-2 shrink-0">
@@ -522,31 +536,55 @@ function MonitorModal({ onClose, onSave, initial }) {
                         setStepError(null); setShowPicker(true)
                       }}
                       className="btn-primary text-xs px-3 py-1.5">
-                      Pick Element
+                      Pick
                     </button>
                     <button type="button" onClick={handleTest}
                       disabled={testing || !form.url || !form.selector}
                       className="btn-secondary text-xs px-3 py-1.5">
-                      {testing ? 'Testing...' : 'Test'}
+                      {testing ? 'Testing…' : 'Test'}
                     </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="label">Type</label>
-                    <select className="input" value={form.selector_type} onChange={set('selector_type')}>
-                      {SELECTOR_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                    </select>
-                  </div>
-                  {form.selector_type === 'css' && (
-                    <div>
-                      <label className="label">Attribute <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(blank = text)</span></label>
-                      <input className="input font-mono text-sm" value={form.attribute} onChange={set('attribute')}
-                        placeholder="value, href, data-price" />
-                    </div>
-                  )}
+                <div>
+                  <label className="label">Selector type</label>
+                  <select className="input" value={form.selector_type} onChange={set('selector_type')}>
+                    {SELECTOR_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
                 </div>
+
+                {/* JS Expression help */}
+                {form.selector_type === 'js_expr' && (
+                  <div className="rounded-lg px-3 py-2.5 text-xs space-y-1.5"
+                    style={{ background: 'color-mix(in srgb, #7c3aed 8%, transparent)', border: '1px solid #7c3aed44' }}>
+                    <p className="font-semibold" style={{ color: '#7c3aed' }}>
+                      <Code2 size={10} className="inline mr-1" />JS Expression — multi-element math
+                    </p>
+                    <p style={{ color: 'var(--muted-foreground)' }}>
+                      Combine values from multiple DOM elements using arithmetic:
+                    </p>
+                    <ul className="space-y-0.5 font-mono text-[10px]" style={{ color: 'var(--foreground)' }}>
+                      <li><strong>css('.score-a') + css('.score-b')</strong> — sum two scores</li>
+                      <li><strong>css('.price') + css('.tax')</strong> — total price</li>
+                      <li><strong>css('.items')[0] + css('.items')[1]</strong> — nth elements</li>
+                      <li><strong>css('input', 'value')</strong> — read input attribute</li>
+                    </ul>
+                    <p style={{ color: 'var(--muted-foreground)' }}>
+                      Currency symbols, commas and spaces are stripped automatically.
+                    </p>
+                  </div>
+                )}
+
+                {form.selector_type === 'css' && (
+                  <div>
+                    <label className="label">
+                      Attribute{' '}
+                      <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(blank = inner text)</span>
+                    </label>
+                    <input className="input font-mono text-sm" value={form.attribute} onChange={set('attribute')}
+                      placeholder="value, href, data-price" />
+                  </div>
+                )}
 
                 <div>
                   <label className="label">Selector</label>
@@ -554,14 +592,17 @@ function MonitorModal({ onClose, onSave, initial }) {
                     placeholder={selType?.placeholder} />
                 </div>
 
+                {/* Selector tips */}
                 <p className="text-[11px] rounded-lg px-3 py-2"
                   style={{ background: 'color-mix(in srgb, var(--primary) 6%, transparent)', color: 'var(--muted-foreground)' }}>
-                  {form.selector_type === 'css'   && 'DevTools → right-click element → Copy → Copy selector'}
-                  {form.selector_type === 'xpath' && 'DevTools → right-click element → Copy → Copy XPath'}
-                  {form.selector_type === 'text'  && 'Paste the exact text you want to detect on the page'}
-                  {form.selector_type === 'regex' && 'Use a capture group e.g. (\\d+) to extract a number'}
+                  {form.selector_type === 'css'     && 'DevTools → right-click element → Copy → Copy selector'}
+                  {form.selector_type === 'xpath'   && 'DevTools → right-click element → Copy → Copy XPath'}
+                  {form.selector_type === 'text'    && 'Paste the exact text you want to detect on the page'}
+                  {form.selector_type === 'regex'   && 'Use a capture group e.g. (\\d+) to extract a number'}
+                  {form.selector_type === 'js_expr' && 'Use css(\'selector\') + css(\'selector\') to combine values'}
                 </p>
 
+                {/* Test result */}
                 {testResult && (
                   <div className="rounded-lg px-3 py-2.5 text-xs space-y-1"
                     style={{
@@ -572,10 +613,11 @@ function MonitorModal({ onClose, onSave, initial }) {
                     }}>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-semibold">
-                        {testResult.error ? 'Error' : testResult.value ? 'Value found' : 'No value extracted'}
+                        {testResult.error ? '⚠ Error' : testResult.value ? '✓ Value found' : '⚠ No value'}
                       </span>
                       <span style={{ color: 'var(--muted-foreground)' }}>
-                        {testResult.duration_ms}ms{testResult.used_playwright ? ' · Playwright' : ''}
+                        {testResult.duration_ms != null ? `${testResult.duration_ms}ms` : ''}
+                        {testResult.used_playwright ? ' · Playwright' : ''}
                       </span>
                     </div>
                     {testResult.value && (
@@ -588,20 +630,20 @@ function MonitorModal({ onClose, onSave, initial }) {
                 )}
               </div>
 
-              {/* Dynamic page */}
+              {/* Playwright toggle */}
               <div className="rounded-xl p-4 space-y-3"
                 style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>Dynamic Page</p>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>Dynamic page (Playwright)</p>
                     <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                      Enable for React, Vue, Angular or any lazy-loaded content
+                      Enable for React, Vue, Angular, Amazon, or any JS-rendered content
                     </p>
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer shrink-0">
                     <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
                       checked={form.use_playwright} onChange={setChk('use_playwright')} />
-                    <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>Playwright</span>
+                    <span className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>Enable</span>
                   </label>
                 </div>
                 {form.use_playwright && (
@@ -636,11 +678,15 @@ function MonitorModal({ onClose, onSave, initial }) {
                     </div>
                   )}
                 </div>
+                <p className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
+                  For numeric comparisons, currency symbols and commas are stripped automatically
+                  (e.g. "KES 1,598.02" → 1598.02)
+                </p>
               </div>
             </div>
           )}
 
-          {/* STEP 2 — SCHEDULE */}
+          {/* ── STEP 2: SCHEDULE ── */}
           {step === 1 && (
             <div className="space-y-4">
               <div>
@@ -678,7 +724,7 @@ function MonitorModal({ onClose, onSave, initial }) {
                     </div>
                   </div>
                   <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                    Min {unitInfo.min}, max {unitInfo.max} {unitInfo.label.toLowerCase()}
+                    Min: {unitInfo.min} {unitInfo.label.toLowerCase()}
                   </p>
                 </div>
               )}
@@ -689,7 +735,7 @@ function MonitorModal({ onClose, onSave, initial }) {
                   <input className="input font-mono" value={form.cron_expression}
                     onChange={set('cron_expression')} placeholder="*/15 * * * *" />
                   <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
-                    e.g. <code>*/15 * * * *</code> = every 15 min, <code>0 9 * * 1-5</code> = weekdays 9am
+                    e.g. <code>*/15 * * * *</code> = every 15 min · <code>0 9 * * 1-5</code> = weekdays 9am UTC
                   </p>
                 </div>
               )}
@@ -719,7 +765,7 @@ function MonitorModal({ onClose, onSave, initial }) {
             </div>
           )}
 
-          {/* STEP 3 — NOTIFY */}
+          {/* ── STEP 3: NOTIFY ── */}
           {step === 2 && (
             <div className="space-y-4">
               <div>
@@ -756,38 +802,42 @@ function MonitorModal({ onClose, onSave, initial }) {
                 <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
                   Variables: <code>{'{name}'}</code> <code>{'{value}'}</code> <code>{'{prev_value}'}</code> <code>{'{url}'}</code>
                 </p>
+
+                {/* Live preview — uses actual form values, not hardcoded */}
                 {form.message_template && (
                   <div className="mt-2 rounded-lg px-3 py-2 text-xs"
                     style={{ background: 'var(--muted)', border: '1px solid var(--border)', color: 'var(--foreground)' }}>
-                    <span className="text-[10px] font-semibold uppercase tracking-wide"
-                      style={{ color: 'var(--muted-foreground)' }}>Preview: </span>
-                    {form.message_template
-                      .replace(/\{name\}/g,       form.name || 'My Monitor')
-                      .replace(/\{value\}/g,       '129.67')
-                      .replace(/\{prev_value\}/g,  '130.12')
-                      .replace(/\{url\}/g,         form.url || 'https://example.com')}
+                    <span className="text-[10px] font-semibold uppercase tracking-wide mr-1"
+                      style={{ color: 'var(--muted-foreground)' }}>Preview:</span>
+                    {messagePreview}
                   </div>
                 )}
               </div>
 
               <div>
-                <label className="label">Webhook URL <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(optional)</span></label>
+                <label className="label">
+                  Webhook URL{' '}
+                  <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(optional)</span>
+                </label>
                 <input className="input font-mono text-sm" type="url" value={form.webhook_url}
                   onChange={set('webhook_url')} placeholder="https://hooks.yourapp.com/monitor" />
                 <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
-                  Sends a POST JSON payload whenever the condition is met
+                  POST JSON payload sent whenever the condition is met
                 </p>
               </div>
 
               <div>
-                <label className="label">Tags <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(comma-separated)</span></label>
+                <label className="label">
+                  Tags{' '}
+                  <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(comma-separated)</span>
+                </label>
                 <input className="input text-sm" value={form.tags} onChange={set('tags')}
                   placeholder="price, stock, kenya" />
               </div>
             </div>
           )}
 
-          {/* STEP 4 — ADVANCED */}
+          {/* ── STEP 4: ADVANCED ── */}
           {step === 3 && (
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
@@ -817,11 +867,45 @@ function MonitorModal({ onClose, onSave, initial }) {
                 Each check retries up to <strong>{form.retry_attempts}</strong> times with a{' '}
                 <strong>{form.timeout_seconds}s</strong> timeout.
               </p>
+
+              {/* Optional: separate monitor vs extract selector */}
+              <div className="rounded-xl p-4 space-y-3"
+                style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>Separate monitor element</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                      Use a different selector to compare the condition, while extracting data from the main selector
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer shrink-0">
+                    <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
+                      checked={form.use_monitor_selector} onChange={setChk('use_monitor_selector')} />
+                    <span className="text-sm" style={{ color: 'var(--foreground)' }}>Enable</span>
+                  </label>
+                </div>
+                {form.use_monitor_selector && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="label">Monitor selector type</label>
+                      <select className="input" value={form.monitor_selector_type}
+                        onChange={set('monitor_selector_type')}>
+                        {SELECTOR_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Monitor selector</label>
+                      <input className="input font-mono text-sm" value={form.monitor_selector}
+                        onChange={set('monitor_selector')} placeholder=".price-display" />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
 
-        {/* ── Element Picker overlay ── */}
+        {/* Element Picker overlay */}
         {showPicker && (
           <ElementPicker
             url={form.url}
@@ -830,7 +914,7 @@ function MonitorModal({ onClose, onSave, initial }) {
           />
         )}
 
-        {/* ── Navigation footer ── */}
+        {/* Footer navigation */}
         <div className="flex gap-3 px-5 py-4 shrink-0"
           style={{ borderTop: '1px solid var(--border)' }}>
           {step === 0 ? (
@@ -838,14 +922,13 @@ function MonitorModal({ onClose, onSave, initial }) {
           ) : (
             <button type="button" onClick={goBack} className="btn-secondary flex-1">Back</button>
           )}
-
           {step < STEPS.length - 1 ? (
             <button type="button" onClick={goNext} className="btn-primary flex-1">
               Next: {STEPS[step + 1].label}
             </button>
           ) : (
             <button type="button" onClick={submit} disabled={loading} className="btn-primary flex-1">
-              {loading ? 'Saving...' : isEdit ? 'Update Monitor' : 'Create Monitor'}
+              {loading ? 'Saving…' : isEdit ? 'Update Monitor' : 'Create Monitor'}
             </button>
           )}
         </div>
@@ -861,7 +944,7 @@ function MonitorModal({ onClose, onSave, initial }) {
 function LogDrawer({ monitor, onLogsChange }) {
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('all')  // all | alert | error | ok
+  const [filter, setFilter] = useState('all')
   const [confirmClear, setConfirmClear] = useState(false)
 
   const loadLogs = useCallback(async () => {
@@ -896,21 +979,20 @@ function LogDrawer({ monitor, onLogsChange }) {
   const filtered = logs.filter(l => {
     if (filter === 'alert') return l.alerted
     if (filter === 'error') return !!l.error
-    if (filter === 'ok') return !l.error && !l.alerted
+    if (filter === 'ok')    return !l.error && !l.alerted
     return true
   })
 
   return (
     <div style={{ borderTop: '1px solid var(--border)' }}>
-      {/* Log toolbar */}
-      <div className="flex items-center justify-between px-5 py-2.5 flex-wrap gap-2"
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2.5 flex-wrap gap-2"
         style={{ background: 'var(--muted)' }}>
         <p className="text-xs font-semibold uppercase tracking-wider"
           style={{ color: 'var(--muted-foreground)' }}>
           Check Log {logs.length > 0 && `(${logs.length})`}
         </p>
         <div className="flex items-center gap-2">
-          {/* Filter */}
           <div className="flex gap-0.5">
             {[['all', 'All'], ['alert', '🔔'], ['error', '⚠️'], ['ok', '✓']].map(([v, l]) => (
               <button key={v} onClick={() => setFilter(v)} type="button"
@@ -921,21 +1003,22 @@ function LogDrawer({ monitor, onLogsChange }) {
                 }}>{l}</button>
             ))}
           </div>
-          {/* Export */}
           <div className="flex gap-1">
             <button onClick={() => exportLogsJSON(logs, monitor.name)} type="button"
               title="Export JSON" className="btn-ghost p-1 text-xs">JSON</button>
             <button onClick={() => exportLogsCSV(logs, monitor.name)} type="button"
               title="Export CSV" className="btn-ghost p-1 text-xs">CSV</button>
           </div>
-          {/* Clear all */}
           {logs.length > 0 && (
             <button onClick={() => setConfirmClear(true)} type="button"
-              className="btn-ghost p-1.5" title="Clear all logs"
+              className="btn-ghost p-1.5"
               style={{ color: 'var(--destructive)' }}>
               <Trash2 size={12} />
             </button>
           )}
+          <button onClick={loadLogs} type="button" className="btn-ghost p-1.5" title="Refresh logs">
+            <RefreshCw size={12} />
+          </button>
         </div>
       </div>
 
@@ -943,29 +1026,37 @@ function LogDrawer({ monitor, onLogsChange }) {
         <div className="flex justify-center py-5"><div className="spinner-sm" /></div>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-center py-5" style={{ color: 'var(--muted-foreground)' }}>
-          {logs.length === 0 ? 'No checks yet' : 'No logs match filter'}
+          {logs.length === 0 ? 'No checks yet — run a check manually or wait for the schedule' : 'No logs match filter'}
         </p>
       ) : (
-        <div className="divide-y max-h-64 overflow-y-auto scrollbar-thin"
+        <div className="divide-y max-h-72 overflow-y-auto scrollbar-thin"
           style={{ borderColor: 'var(--border)' }}>
           {filtered.map(l => (
-            <div key={l.id} className="flex items-start gap-3 px-5 py-2.5 text-sm group"
+            <div key={l.id}
+              className="flex items-start gap-3 px-4 py-2.5 text-sm group transition-colors"
               style={{ background: 'var(--card)' }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--muted)'}
               onMouseLeave={e => e.currentTarget.style.background = 'var(--card)'}>
-              {l.error
-                ? <AlertCircle size={13} style={{ color: 'var(--destructive)', marginTop: 2 }} className="shrink-0" />
-                : l.alerted
-                  ? <Zap size={13} className="text-amber-500 shrink-0 mt-0.5" />
-                  : l.condition_met
-                    ? <CheckCircle2 size={13} className="text-emerald-500 shrink-0 mt-0.5" />
-                    : <Clock size={13} className="shrink-0 mt-0.5" style={{ color: 'var(--muted-foreground)' }} />}
+
+              {/* Icon */}
+              <div className="mt-0.5 shrink-0">
+                {l.error
+                  ? <AlertCircle size={13} style={{ color: 'var(--destructive)' }} />
+                  : l.alerted
+                    ? <Zap size={13} className="text-amber-500" />
+                    : l.condition_met
+                      ? <CheckCircle2 size={13} className="text-emerald-500" />
+                      : <Clock size={13} style={{ color: 'var(--muted-foreground)' }} />}
+              </div>
 
               <div className="flex-1 min-w-0">
+                {/* Value display */}
                 {l.value_found !== null && l.value_found !== undefined ? (
                   <p className="font-mono text-xs truncate" style={{ color: 'var(--foreground)' }}>
                     <span className="font-semibold">
-                      {l.value_found === '' ? <span style={{ color: 'var(--muted-foreground)', fontStyle: 'italic' }}>empty</span> : l.value_found}
+                      {l.value_found === ''
+                        ? <span style={{ color: 'var(--muted-foreground)', fontStyle: 'italic' }}>empty</span>
+                        : l.value_found}
                     </span>
                     {l.prev_value !== null && l.prev_value !== undefined && l.prev_value !== l.value_found && (
                       <span style={{ color: 'var(--muted-foreground)' }}> ← {l.prev_value}</span>
@@ -973,11 +1064,13 @@ function LogDrawer({ monitor, onLogsChange }) {
                   </p>
                 ) : (
                   <p className="font-mono text-xs" style={{ color: 'var(--muted-foreground)', fontStyle: 'italic' }}>
-                    no value — selector didn't match
+                    no value extracted
                   </p>
                 )}
+
+                {/* Meta row */}
                 <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                  {l.error && <p className="text-xs" style={{ color: 'var(--destructive)' }}>{l.error}</p>}
+                  {l.error && <p className="text-xs truncate max-w-xs" style={{ color: 'var(--destructive)' }}>{l.error}</p>}
                   {l.alerted && <span className="badge-blue text-[10px]">alerted</span>}
                   {l.duration_ms != null && (
                     <span className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>{l.duration_ms}ms</span>
@@ -995,6 +1088,7 @@ function LogDrawer({ monitor, onLogsChange }) {
                 </div>
               </div>
 
+              {/* Time + delete */}
               <div className="flex items-center gap-2 shrink-0">
                 <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                   {formatDistanceToNow(
@@ -1004,7 +1098,7 @@ function LogDrawer({ monitor, onLogsChange }) {
                 </p>
                 <button onClick={() => handleDeleteLog(l.id)} type="button"
                   className="opacity-0 group-hover:opacity-100 btn-ghost p-1 transition-opacity"
-                  style={{ color: 'var(--destructive)' }} title="Delete log">
+                  style={{ color: 'var(--destructive)' }}>
                   <Trash2 size={11} />
                 </button>
               </div>
@@ -1033,9 +1127,9 @@ function Countdown({ targetDate }) {
   }, [targetDate])
   if (!label) return null
   return (
-    <span className="flex items-center gap-1">
+    <span className="inline-flex items-center gap-1">
       <Timer size={10} />
-      {label}
+      {label === 'now' ? <span style={{ color: 'var(--primary)' }}>running soon</span> : label}
     </span>
   )
 }
@@ -1045,148 +1139,149 @@ function Countdown({ targetDate }) {
 function MonitorCard({ m, onEdit, onDelete, onToggle, onCheck, onClone, checking }) {
   const [expanded, setExpanded] = useState(false)
   const rate = successRate(m)
+  const sc = STATUS_COLOR[m.status] || { dot: 'var(--muted-foreground)', badge: 'badge-gray' }
 
   return (
-    <div>
-      <div className="flex items-start gap-3 px-5 py-4 transition-colors"
-        onMouseEnter={e => e.currentTarget.style.background = 'var(--muted)'}
-        onMouseLeave={e => e.currentTarget.style.background = ''}>
+    <div className="rounded-xl overflow-hidden transition-all"
+      style={{ border: '1px solid var(--border)', background: 'var(--card)' }}>
 
-        {/* Status dot */}
-        <div className="w-2 h-2 rounded-full mt-2 shrink-0"
-          style={{
-            background: m.status === 'active' ? '#16a34a'
-              : m.status === 'error' ? 'var(--destructive)'
-              : 'var(--muted-foreground)',
-          }} />
+      {/* Card header */}
+      <div className="px-4 py-3 sm:px-5 sm:py-4">
+        <div className="flex items-start gap-3">
+          {/* Status dot */}
+          <div className="w-2 h-2 rounded-full mt-1.5 shrink-0"
+            style={{ background: sc.dot, boxShadow: m.status === 'active' ? `0 0 0 3px ${sc.dot}22` : 'none' }} />
 
-        <div className="flex-1 min-w-0">
-          {/* Name + badges */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>{m.name}</p>
-            <span className={STATUS_STYLE[m.status] || 'badge-gray'}>{m.status}</span>
-            {m.use_playwright && <span className="badge-purple">playwright</span>}
-            {(m.notify_channels || []).map(ch => (
-              <span key={ch} className="badge-gray capitalize text-xs">{ch}</span>
-            ))}
-            {(m.tags || []).map(t => (
-              <span key={t} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full"
-                style={{ background: 'var(--accent)', color: 'var(--accent-foreground)' }}>
-                <Tag size={8} />{t}
+          <div className="flex-1 min-w-0">
+            {/* Name + badges row */}
+            <div className="flex items-start gap-2 flex-wrap">
+              <p className="font-semibold text-sm leading-snug" style={{ color: 'var(--foreground)' }}>
+                {m.name}
+              </p>
+              <span className={`${sc.badge} text-[10px] shrink-0`}>{m.status}</span>
+              {m.use_playwright && <span className="badge-purple text-[10px] shrink-0">playwright</span>}
+              {(m.notify_channels || []).map(ch => (
+                <span key={ch} className="badge-gray text-[10px] capitalize shrink-0">{ch}</span>
+              ))}
+            </div>
+
+            {/* URL */}
+            <p className="text-xs font-mono mt-1 truncate" style={{ color: 'var(--muted-foreground)', maxWidth: '100%' }}>
+              {m.url}
+            </p>
+
+            {/* Selector + condition */}
+            <p className="text-xs mt-1 truncate" style={{ color: 'var(--muted-foreground)' }}>
+              <span className="font-mono px-1 rounded mr-1 text-[10px]"
+                style={{ background: 'var(--muted)' }}>{m.selector_type}</span>
+              <span className="font-mono" style={{ opacity: 0.75 }}>
+                {m.selector.length > 45 ? m.selector.slice(0, 45) + '…' : m.selector}
               </span>
-            ))}
-          </div>
-
-          {/* URL */}
-          <p className="text-xs font-mono mt-0.5 truncate" style={{ color: 'var(--muted-foreground)' }}>{m.url}</p>
-
-          {/* Selector info */}
-          <p className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-            <span className="font-mono rounded px-1 mr-1" style={{ background: 'var(--muted)' }}>{m.selector_type}</span>
-            <span className="font-mono" style={{ color: 'var(--foreground)', opacity: 0.7 }}>
-              {m.selector.length > 50 ? m.selector.slice(0, 50) + '…' : m.selector}
-            </span>
-            {m.monitor_selector && (
-              <span className="ml-1 opacity-60">→ watch: {m.monitor_selector.slice(0, 30)}</span>
-            )}
-            {m.condition_operator && (
-              <> · {OPERATORS.find(o => o.value === m.condition_operator)?.label}
-                {m.condition_value && ` "${m.condition_value}"`}</>
-            )}
-          </p>
-
-          {/* Metrics row */}
-          <div className="flex items-center gap-3 mt-1.5 flex-wrap text-[11px]"
-            style={{ color: 'var(--muted-foreground)' }}>
-
-            {/* Interval */}
-            <span title="Check interval">
-              every {m.check_interval_minutes} {m.check_interval_unit || 'min'}
-            </span>
-
-            {/* Countdown */}
-            {m.next_run_at && m.status === 'active' && (
-              <Countdown targetDate={m.next_run_at} />
-            )}
-
-            {/* Last run */}
-            {m.last_checked_at && (
-              <span title={`Last run: ${format(new Date(m.last_checked_at.endsWith('Z') ? m.last_checked_at : m.last_checked_at + 'Z'), 'PPp')}`}>
-                last: {formatDistanceToNow(
-                  new Date(m.last_checked_at.endsWith('Z') ? m.last_checked_at : m.last_checked_at + 'Z'),
-                  { addSuffix: true }
-                )}
-              </span>
-            )}
-
-            {/* Run count */}
-            {m.run_count > 0 && (
-              <span title="Total runs">
-                {m.run_count} run{m.run_count !== 1 ? 's' : ''}
-              </span>
-            )}
-
-            {/* Success rate */}
-            {rate !== null && (
-              <span title="Success rate (last runs)"
-                style={{ color: rate >= 80 ? '#16a34a' : rate >= 50 ? '#d97706' : 'var(--destructive)' }}>
-                {rate}% ok
-              </span>
-            )}
-
-            {/* Last value */}
-            {m.last_value !== null && m.last_value !== undefined && (
-              <span title="Last extracted value">
-                val: <span className="font-mono font-medium" style={{ color: 'var(--foreground)' }}>
-                  {m.last_value === '' ? <em>empty</em> : `"${m.last_value.slice(0, 40)}"`}
+              {m.condition_operator && (
+                <span className="ml-1 opacity-60">
+                  · {OPERATORS.find(o => o.value === m.condition_operator)?.label}
+                  {m.condition_value && ` "${m.condition_value}"`}
                 </span>
-              </span>
-            )}
+              )}
+            </p>
 
-            {/* Alert count */}
-            {m.alert_count > 0 && (
-              <span style={{ color: '#d97706', fontWeight: 600 }}>
-                🔔 {m.alert_count}
-              </span>
-            )}
+            {/* Metrics row — wraps on mobile */}
+            <div className="flex items-center gap-x-3 gap-y-1 mt-2 flex-wrap text-[11px]"
+              style={{ color: 'var(--muted-foreground)' }}>
 
-            {/* Error */}
-            {m.error_message && (
-              <span className="truncate max-w-48" style={{ color: 'var(--destructive)' }}
-                title={m.error_message}>⚠ {m.error_message.slice(0, 60)}</span>
+              <span>
+                every {m.check_interval_minutes} {m.check_interval_unit || 'min'}
+              </span>
+
+              {m.next_run_at && m.status === 'active' && (
+                <Countdown targetDate={m.next_run_at} />
+              )}
+
+              {m.last_checked_at && (
+                <span title={format(new Date(
+                  m.last_checked_at.endsWith('Z') ? m.last_checked_at : m.last_checked_at + 'Z'
+                ), 'PPp')}>
+                  last: {formatDistanceToNow(
+                    new Date(m.last_checked_at.endsWith('Z') ? m.last_checked_at : m.last_checked_at + 'Z'),
+                    { addSuffix: true }
+                  )}
+                </span>
+              )}
+
+              {m.run_count > 0 && (
+                <span>{m.run_count} run{m.run_count !== 1 ? 's' : ''}</span>
+              )}
+
+              {rate !== null && (
+                <span style={{ color: rate >= 80 ? '#16a34a' : rate >= 50 ? '#d97706' : 'var(--destructive)', fontWeight: 600 }}>
+                  {rate}% ok
+                </span>
+              )}
+
+              {m.last_value !== null && m.last_value !== undefined && (
+                <span>
+                  val: <span className="font-mono font-medium" style={{ color: 'var(--foreground)' }}>
+                    {m.last_value === '' ? <em>empty</em> : `"${String(m.last_value).slice(0, 40)}"`}
+                  </span>
+                </span>
+              )}
+
+              {m.alert_count > 0 && (
+                <span style={{ color: '#d97706', fontWeight: 600 }}>
+                  🔔 {m.alert_count}
+                </span>
+              )}
+
+              {m.error_message && (
+                <span className="truncate max-w-[200px]" style={{ color: 'var(--destructive)' }}
+                  title={m.error_message}>⚠ {m.error_message.slice(0, 55)}</span>
+              )}
+            </div>
+
+            {/* Tags */}
+            {(m.tags || []).length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {(m.tags || []).map(t => (
+                  <span key={t} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full"
+                    style={{ background: 'var(--accent)', color: 'var(--accent-foreground)' }}>
+                    <Tag size={8} />{t}
+                  </span>
+                ))}
+              </div>
             )}
           </div>
-        </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-0.5 shrink-0">
-          <button onClick={() => onCheck(m)} disabled={checking}
-            className="btn-ghost p-2" title="Check now">
-            {checking ? <div className="spinner-sm" /> : <Play size={14} />}
-          </button>
-          <button onClick={() => setExpanded(v => !v)} className="btn-ghost p-2" title="View logs">
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-          <button onClick={() => onToggle(m)} className="btn-ghost p-2"
-            title={m.status === 'active' ? 'Pause' : 'Resume'}>
-            {m.status === 'active' ? <Pause size={14} /> : <Play size={14} style={{ color: 'var(--primary)' }} />}
-          </button>
-          <button onClick={() => onClone(m)} className="btn-ghost p-2" title="Clone monitor">
-            <Copy size={14} />
-          </button>
-          <button onClick={() => onEdit(m)} className="btn-ghost p-2" title="Edit">
-            <Settings2 size={14} />
-          </button>
-          <button onClick={() => onDelete(m)} className="btn-ghost p-2"
-            style={{ color: 'var(--destructive)' }} title="Delete">
-            <Trash2 size={14} />
-          </button>
+          {/* Action buttons — stacked vertically on mobile, row on desktop */}
+          <div className="flex flex-col sm:flex-row items-center gap-0.5 shrink-0 ml-1">
+            <button onClick={() => onCheck(m)} disabled={checking}
+              className="btn-ghost p-2" title="Check now">
+              {checking ? <div className="spinner-sm" /> : <Play size={13} />}
+            </button>
+            <button onClick={() => setExpanded(v => !v)} className="btn-ghost p-2" title="View logs">
+              {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+            <button onClick={() => onToggle(m)} className="btn-ghost p-2"
+              title={m.status === 'active' ? 'Pause' : 'Resume'}>
+              {m.status === 'active'
+                ? <Pause size={13} />
+                : <Play size={13} style={{ color: 'var(--primary)' }} />}
+            </button>
+            <button onClick={() => onClone(m)} className="btn-ghost p-2" title="Clone">
+              <Copy size={13} />
+            </button>
+            <button onClick={() => onEdit(m)} className="btn-ghost p-2" title="Edit">
+              <Settings2 size={13} />
+            </button>
+            <button onClick={() => onDelete(m)} className="btn-ghost p-2"
+              style={{ color: 'var(--destructive)' }} title="Delete">
+              <Trash2 size={13} />
+            </button>
+          </div>
         </div>
       </div>
 
-      {expanded && (
-        <LogDrawer monitor={m} />
-      )}
+      {/* Log drawer */}
+      {expanded && <LogDrawer monitor={m} />}
     </div>
   )
 }
@@ -1195,14 +1290,14 @@ function MonitorCard({ m, onEdit, onDelete, onToggle, onCheck, onClone, checking
 
 export default function ScraperPage() {
   const [monitors, setMonitors] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading]   = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [editing, setEditing] = useState(null)
+  const [editing, setEditing]    = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
-  const [checking, setChecking] = useState(null)
+  const [checking, setChecking]  = useState(null)
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterTag, setFilterTag] = useState('')
-  const [search, setSearch] = useState('')
+  const [search, setSearch]      = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -1217,9 +1312,9 @@ export default function ScraperPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Refresh next_run_at countdown every 30s
+  // Refresh countdown every 15s
   useEffect(() => {
-    const id = setInterval(load, 30000)
+    const id = setInterval(load, 15000)
     return () => clearInterval(id)
   }, [load])
 
@@ -1244,14 +1339,13 @@ export default function ScraperPage() {
       if (data.error) {
         msg = `Error: ${data.error}`
       } else if (data.value_found === null || data.value_found === undefined) {
-        msg = 'No value extracted — selector did not match. Check the selector in the form.'
+        msg = 'No value extracted — selector did not match. Check selector in the form.'
       } else if (data.value_found === '') {
         msg = 'Element found but value is empty — try a different attribute or increase wait time.'
       } else {
         msg = `Extracted: "${data.value_found}" — ${data.condition_met ? 'condition MET ✓' : 'condition not met'}`
       }
       toast(msg, { icon: data.condition_met ? '🔔' : data.value_found ? '🔍' : '⚠️', duration: 7000 })
-      // Update the monitor with fresh data from server
       if (data.monitor) {
         setMonitors(ms => ms.map(m2 => m2.id === m.id ? data.monitor : m2))
       } else {
@@ -1287,7 +1381,6 @@ export default function ScraperPage() {
     setConfirmDelete(null)
   }
 
-  // Collect all unique tags
   const allTags = [...new Set(monitors.flatMap(m => m.tags || []))]
 
   const filtered = monitors.filter(m => {
@@ -1299,6 +1392,9 @@ export default function ScraperPage() {
     }
     return true
   })
+
+  const activeCount = monitors.filter(m => m.status === 'active').length
+  const errorCount  = monitors.filter(m => m.status === 'error').length
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -1313,15 +1409,36 @@ export default function ScraperPage() {
         </button>
       </div>
 
+      {/* Summary badges */}
+      {!loading && monitors.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="px-2 py-1 rounded-lg font-medium"
+            style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>
+            {monitors.length} total
+          </span>
+          {activeCount > 0 && (
+            <span className="px-2 py-1 rounded-lg font-medium"
+              style={{ background: 'color-mix(in srgb, #16a34a 12%, transparent)', color: '#16a34a' }}>
+              {activeCount} active
+            </span>
+          )}
+          {errorCount > 0 && (
+            <span className="px-2 py-1 rounded-lg font-medium"
+              style={{ background: 'color-mix(in srgb, var(--destructive) 12%, transparent)', color: 'var(--destructive)' }}>
+              {errorCount} error{errorCount !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Filters */}
       {!loading && monitors.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Search */}
           <input
-            className="input text-sm py-1.5 px-3 max-w-xs"
+            className="input text-sm py-1.5 px-3 w-full sm:max-w-xs"
             placeholder="Search monitors…"
             value={search} onChange={e => setSearch(e.target.value)}
           />
-          {/* Status filter */}
           {['all', 'active', 'paused', 'error'].map(s => (
             <button key={s} onClick={() => setFilterStatus(s)}
               className="px-2.5 py-1 rounded-lg text-xs font-medium capitalize transition-colors"
@@ -1330,7 +1447,6 @@ export default function ScraperPage() {
                 color: filterStatus === s ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
               }}>{s}</button>
           ))}
-          {/* Tag filter */}
           {allTags.length > 0 && (
             <div className="flex items-center gap-1">
               <Tag size={12} style={{ color: 'var(--muted-foreground)' }} />
@@ -1344,19 +1460,19 @@ export default function ScraperPage() {
               ))}
             </div>
           )}
-          {/* Refresh */}
           <button onClick={load} className="btn-ghost p-1.5 ml-auto" title="Refresh">
             <RefreshCw size={14} />
           </button>
         </div>
       )}
 
+      {/* Monitor list */}
       {loading ? (
         <div className="flex justify-center py-20"><div className="spinner-lg" /></div>
       ) : monitors.length === 0 ? (
         <div className="card">
           <EmptyState icon={Globe} title="No monitors yet"
-            description="Track prices, stock levels, headlines — on any website including SPAs"
+            description="Track prices, stock levels, headlines — on any website including SPAs. Supports multi-element expressions."
             action={
               <button onClick={() => setShowModal(true)} className="btn-primary inline-flex">
                 <Plus size={14} /> Create monitor
@@ -1370,7 +1486,7 @@ export default function ScraperPage() {
           </p>
         </div>
       ) : (
-        <div className="card divide-y" style={{ borderColor: 'var(--border)' }}>
+        <div className="space-y-3">
           {filtered.map(m => (
             <MonitorCard
               key={m.id}

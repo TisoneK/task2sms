@@ -1,14 +1,13 @@
 """
 Scraper service — supports static (httpx + BS4) and dynamic (Playwright) monitoring.
 
-New features:
-- Decoupled monitor_selector vs. extract selector
-- Retry mechanism with configurable attempts
-- Duration tracking
-- Webhook notifications
-- Log delete/clear helpers
-- Run metrics (run_count, success_count, fail_count, consecutive_failures)
-- Dead-monitor auto-pause after N consecutive failures
+Improvements v2:
+- Robust numeric extraction: strips currency symbols, commas, spaces
+  e.g. "KES 1,598.02" → 1598.02, "KES1598.02" → 1598.02
+- JS expression selector type: allows combining multiple elements
+  e.g. css('.span-a') + css('.span-b')
+- Selector not matching → counted as FAILED run (not "100% ok")
+- Correct success/fail tracking
 """
 import httpx
 import re
@@ -43,7 +42,6 @@ async def _fetch_static(url: str, user_agent: Optional[str] = None,
         return resp.text
 
 
-# Stealth JS injected before page load to defeat basic bot-detection
 _STEALTH_JS = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
@@ -56,29 +54,18 @@ Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
 async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
                           wait_selector: Optional[str] = None,
                           wait_ms: int = 3000) -> str:
-    """Playwright headless fetch with stealth injection.
-
-    Raises RuntimeError if Playwright is not installed so the caller knows
-    exactly what happened instead of silently falling back to static.
-    """
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        raise RuntimeError(
-            "Playwright is not installed. Run: playwright install chromium"
-        )
+        raise RuntimeError("Playwright is not installed. Run: playwright install chromium")
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=True,
             args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
+                "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
                 "--disable-blink-features=AutomationControlled",
-                "--disable-extensions",
-                "--no-first-run",
-                "--disable-default-apps",
+                "--disable-extensions", "--no-first-run", "--disable-default-apps",
             ],
         )
         context = await browser.new_context(
@@ -86,34 +73,22 @@ async def _fetch_dynamic(url: str, user_agent: Optional[str] = None,
             viewport={"width": 1280, "height": 900},
             locale="en-US",
             timezone_id="America/New_York",
-            # Appear as a real browser, not a bot
             java_script_enabled=True,
             accept_downloads=False,
         )
-
-        # Inject stealth script before every page navigation
         await context.add_init_script(_STEALTH_JS)
-
         page = await context.new_page()
-
-        # Block only heavy media — keep CSS/fonts so the page renders normally
-        # (blocking too much can make sites detect us as a bot)
-        await page.route(
-            "**/*.{mp4,mp3,avi,webm,ogg}",
-            lambda r: r.abort()
-        )
-
+        await page.route("**/*.{mp4,mp3,avi,webm,ogg}", lambda r: r.abort())
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
         if wait_selector:
             try:
                 await page.wait_for_selector(wait_selector, timeout=10000)
             except Exception:
-                pass  # continue even if selector not found in time
+                pass
         else:
             await page.wait_for_timeout(wait_ms)
 
-        # Stamp live JS input .value back onto HTML attributes
         await page.evaluate("""() => {
             document.querySelectorAll('input, select, textarea').forEach(el => {
                 if (el.value !== undefined && el.value !== '') {
@@ -142,22 +117,14 @@ def _should_use_playwright(html: str, url: str) -> bool:
         "window.__INITIAL_STATE__", "window.__NUXT__", "window.__NEXT_DATA__",
     ]
     html_lower = html[:8000]
-    if any(sig in html_lower for sig in js_signals):
-        return True
-    return False
+    return any(sig in html_lower for sig in js_signals)
 
 
 async def fetch_page(monitor: ScraperMonitor) -> tuple:
-    """Returns (html: str, fetch_method: str).
-
-    fetch_method is one of: 'static', 'playwright', 'static_fallback'
-    Raises on unrecoverable errors (including Playwright not installed when required).
-    """
     use_playwright = getattr(monitor, "use_playwright", False)
     timeout = getattr(monitor, "timeout_seconds", 30) or 30
 
     if use_playwright:
-        # Playwright explicitly requested — do not silently fall back
         html = await _fetch_dynamic(
             monitor.url,
             user_agent=monitor.user_agent,
@@ -180,10 +147,45 @@ async def fetch_page(monitor: ScraperMonitor) -> tuple:
     return html, "static"
 
 
+# ── Numeric helper ────────────────────────────────────────────────────────────
+
+def _clean_numeric_string(raw: str) -> Optional[float]:
+    """
+    Convert messy numeric string to float.
+    Handles: "KES 1,598.02" → 1598.02, "$129.75" → 129.75,
+             "1,165,390,165.33" → 1165390165.33, "1 USD = 129.75" → 129.75
+    """
+    if not raw:
+        return None
+    # Remove currency codes/symbols and whitespace
+    cleaned = re.sub(r"[A-Za-z$€£¥₹₦₽\s]", " ", raw.strip())
+    # Find all number-like substrings
+    nums = re.findall(r"-?[\d,]+\.?\d*|-?\.\d+", cleaned)
+    if not nums:
+        return None
+    # Take the last/longest number found (most likely the value)
+    num_str = max(nums, key=len)
+    # Handle thousands commas: 1,598.02 → 1598.02
+    if re.search(r",\d{3}(\.|$)", num_str):
+        num_str = num_str.replace(",", "")
+    elif num_str.count(",") == 1 and "." not in num_str:
+        # European decimal: "1,50" → "1.50"
+        num_str = num_str.replace(",", ".")
+    else:
+        num_str = num_str.replace(",", "")
+    try:
+        return float(num_str)
+    except (ValueError, TypeError):
+        return None
+
+
 # ── Extract ───────────────────────────────────────────────────────────────────
 
 def _extract(html: str, selector_type, selector: str, attribute: Optional[str]) -> Optional[str]:
     st = selector_type.value if hasattr(selector_type, "value") else str(selector_type)
+
+    if st == "js_expr":
+        return _extract_js_expr(html, selector)
 
     if st == "css":
         soup = BeautifulSoup(html, "lxml")
@@ -226,6 +228,82 @@ def _extract(html: str, selector_type, selector: str, attribute: Optional[str]) 
     return None
 
 
+def _extract_js_expr(html: str, expression: str) -> Optional[str]:
+    """
+    Evaluate JS-like math expression over CSS selectors.
+
+    Supported syntax:
+      css('.a') + css('.b')           sum of two elements' numeric values
+      css('.a') - css('.b')
+      css('.a') * css('.b')
+      css('.a') / css('.b')
+      css('.items')[2]                third element with that selector
+      css('.input-el', 'value')       use attribute
+
+    Examples:
+      css('.score-home') + css('.score-away')  → "135"
+      css('.price') + css('.tax')              → "142.50"
+    """
+    soup = BeautifulSoup(html, "lxml")
+
+    def _get_val(css_sel: str, attr: Optional[str] = None, index: int = 0) -> Optional[float]:
+        els = soup.select(css_sel)
+        if not els or index >= len(els):
+            return None
+        el = els[index]
+        if attr and attr not in ("text", "innerText"):
+            raw = el.get(attr)
+        elif el.name in ("input", "select", "textarea"):
+            raw = el.get("value") or el.get_text(strip=True)
+        else:
+            raw = el.get_text(strip=True)
+        return _clean_numeric_string(raw or "")
+
+    # Match css('selector') or css('selector', 'attr') optionally followed by [N]
+    operand_pat = re.compile(
+        r"""css\(\s*['"](.+?)['"]\s*(?:,\s*['"](.+?)['"]\s*)?\)(?:\[(\d+)\])?""",
+        re.IGNORECASE
+    )
+
+    tokens = []
+    ops = []
+    last_end = 0
+
+    for m in operand_pat.finditer(expression):
+        between = expression[last_end:m.start()].strip()
+        if between and tokens:
+            ops.append(between)
+        sel = m.group(1)
+        attr = m.group(2)
+        idx = int(m.group(3)) if m.group(3) else 0
+        val = _get_val(sel, attr, idx)
+        tokens.append(val)
+        last_end = m.end()
+
+    if not tokens:
+        return None
+    if any(v is None for v in tokens):
+        return None
+
+    result = tokens[0]
+    for i, op in enumerate(ops):
+        if i + 1 >= len(tokens):
+            break
+        rhs = tokens[i + 1]
+        if "+" in op:
+            result += rhs
+        elif "-" in op:
+            result -= rhs
+        elif "*" in op:
+            result *= rhs
+        elif "/" in op and rhs != 0:
+            result /= rhs
+
+    if result == int(result):
+        return str(int(result))
+    return f"{result:.6f}".rstrip("0").rstrip(".")
+
+
 # ── Condition ─────────────────────────────────────────────────────────────────
 
 def _check_condition(value: Optional[str], operator: Optional[str],
@@ -240,16 +318,23 @@ def _check_condition(value: Optional[str], operator: Optional[str],
         return bool(cond_value) and cond_value in value
     if operator == "not_contains":
         return not (bool(cond_value) and cond_value in value)
-    try:
-        num = float(re.sub(r"[^\d.\-]", "", value))
-        cnum = float(re.sub(r"[^\d.\-]", "", cond_value or ""))
+
+    # Numeric comparison using robust cleaner
+    num = _clean_numeric_string(value)
+    cnum = _clean_numeric_string(cond_value or "")
+
+    if num is not None and cnum is not None:
         return {
-            "gt": num > cnum, "gte": num >= cnum,
-            "lt": num < cnum,  "lte": num <= cnum,
-            "eq": num == cnum, "neq": num != cnum,
+            "gt":  num >  cnum,
+            "gte": num >= cnum,
+            "lt":  num <  cnum,
+            "lte": num <= cnum,
+            "eq":  num == cnum,
+            "neq": num != cnum,
         }.get(operator, False)
-    except (ValueError, TypeError):
-        return {"eq": value == cond_value, "neq": value != cond_value}.get(operator, False)
+
+    # Fallback: string comparison
+    return {"eq": value == cond_value, "neq": value != cond_value}.get(operator, False)
 
 
 # ── Check & notify ────────────────────────────────────────────────────────────
@@ -307,7 +392,6 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
         monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
         monitor.consecutive_failures = (getattr(monitor, "consecutive_failures", 0) or 0) + 1
 
-        # Auto-pause after too many consecutive failures
         max_fail = getattr(monitor, "max_failures_before_pause", 10) or 10
         if monitor.consecutive_failures >= max_fail:
             monitor.status = MonitorStatus.PAUSED
@@ -316,28 +400,35 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
         log.value_found = value
         log.prev_value = prev_value
 
-        # Use monitor_value for condition check (may be same as value if no monitor_selector)
-        check_value = monitor_value if monitor_value is not None else value
-
-        if monitor.condition_operator == "changed":
-            if prev_value is None:
-                condition_met = False
-            else:
-                condition_met = check_value != prev_value
+        # Selector matched nothing → treat as a FAILED run, not a "success"
+        # This is the key fix for "4 runs, 100% ok but no data"
+        if value is None:
+            log.condition_met = False
+            log.error = "Selector matched no element — page structure may have changed or selector is wrong"
+            monitor.last_checked_at = datetime.now(timezone.utc)
+            monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
+            monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
+            monitor.consecutive_failures = (getattr(monitor, "consecutive_failures", 0) or 0) + 1
+            monitor.error_message = "Selector matched no element"
+            # Switch to ERROR after 3+ consecutive selector-not-found
+            if monitor.consecutive_failures >= 3:
+                monitor.status = MonitorStatus.ERROR
         else:
-            condition_met = _check_condition(check_value, monitor.condition_operator, monitor.condition_value)
+            check_value = monitor_value if monitor_value is not None else value
 
-        log.condition_met = condition_met
-        monitor.last_checked_at = datetime.now(timezone.utc)
-        # Store check_value (the thing we compare) as last_value so that the
-        # next run's prev_value is consistent with what we actually checked.
-        # log.value_found still holds the raw extract value for display.
-        monitor.last_value = check_value
-        monitor.error_message = None
-        monitor.status = MonitorStatus.ACTIVE
-        monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
-        monitor.success_count = (getattr(monitor, "success_count", 0) or 0) + 1
-        monitor.consecutive_failures = 0
+            if monitor.condition_operator == "changed":
+                condition_met = False if prev_value is None else (check_value != prev_value)
+            else:
+                condition_met = _check_condition(check_value, monitor.condition_operator, monitor.condition_value)
+
+            log.condition_met = condition_met
+            monitor.last_checked_at = datetime.now(timezone.utc)
+            monitor.last_value = check_value
+            monitor.error_message = None
+            monitor.status = MonitorStatus.ACTIVE
+            monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
+            monitor.success_count = (getattr(monitor, "success_count", 0) or 0) + 1
+            monitor.consecutive_failures = 0
 
     await db.commit()
     return log
@@ -397,7 +488,6 @@ async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
             except Exception as e:
                 logger.error(f"Telegram notify failed for {r}: {e}")
 
-    # Webhook notification
     webhook_url = getattr(monitor, "webhook_url", None)
     if webhook_url:
         try:
@@ -420,7 +510,6 @@ async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
     monitor.alert_count = (monitor.alert_count or 0) + 1
     await db.commit()
 
-    # Bump use_count on contacts so they surface at top of suggestions
     if recipients:
         try:
             from app.api.routes.contacts import bump_use_count
