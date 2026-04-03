@@ -503,7 +503,7 @@ async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
     # Check if monitor should stop after condition met
     if getattr(monitor, 'stop_on_condition_met', True):
         monitor.status = MonitorStatus.PAUSED
-        monitor.error_message = "Automatically paused after condition was met"
+        # Don't use error_message for informational messages - use a different approach
         logger.info(f"Monitor {monitor.id}: Auto-paused after condition met")
 
     context = {

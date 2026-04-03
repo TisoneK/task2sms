@@ -622,7 +622,9 @@ function MonitorModal({ onClose, onSave, initial }) {
                         {testResult.error ? '⚠ Error' : testResult.value ? '✓ Value found' : '⚠ No value'}
                       </span>
                       <span style={{ color: 'var(--muted-foreground)' }}>
-                        {testResult.duration_ms != null ? `${testResult.duration_ms}ms` : ''}
+                        {testResult.duration_ms != null ? (
+                          testResult.duration_ms < 1000 ? `${testResult.duration_ms}ms` : `${(testResult.duration_ms / 1000).toFixed(1)}s`
+                        ) : ''}
                         {testResult.used_playwright ? ' · Playwright' : ''}
                       </span>
                     </div>
@@ -1100,7 +1102,9 @@ function LogDrawer({ monitor, onLogsChange }) {
                   {l.error && <p className="text-xs truncate max-w-xs" style={{ color: 'var(--destructive)' }}>{l.error}</p>}
                   {l.alerted && <span className="badge-blue text-[10px]">alerted</span>}
                   {l.duration_ms != null && (
-                    <span className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>{l.duration_ms}ms</span>
+                    <span className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
+                      {l.duration_ms < 1000 ? `${l.duration_ms}ms` : `${(l.duration_ms / 1000).toFixed(1)}s`}
+                    </span>
                   )}
                   {l.fetch_method && (
                     <span className="text-[10px] px-1 rounded" style={{
@@ -1269,6 +1273,14 @@ function MonitorCard({ m, onEdit, onDelete, onToggle, onCheck, onClone, checking
               {m.error_message && (
                 <span className="truncate max-w-[200px]" style={{ color: 'var(--destructive)' }}
                   title={m.error_message}>⚠ {m.error_message.slice(0, 55)}</span>
+              )}
+
+              {/* Show success message for auto-paused monitors */}
+              {m.status === 'paused' && !m.error_message && m.alert_count > 0 && (
+                <span className="truncate max-w-[200px]" style={{ color: '#16a34a' }}
+                  title="Monitor automatically paused after condition was met - saving tokens">
+                  ✓ Auto-paused after success
+                </span>
               )}
             </div>
 
