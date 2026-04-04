@@ -193,6 +193,7 @@ function validateStep(step, form, recipientInput) {
       return 'Cron expression is required'
   }
   if (step === 'notify') {
+    if (form.notify_channels.length === 0) return 'At least one notification channel is required'
     const recipients = recipientInput.split(',').map(s => s.trim()).filter(Boolean)
     if (recipients.length === 0) return 'At least one recipient is required'
   }
@@ -532,6 +533,7 @@ function MonitorModal({ onClose, onSave, initial }) {
       time_window_start:      src.time_window_start      || '',
       time_window_end:        src.time_window_end        || '',
       skip_weekends:          src.skip_weekends          || false,
+      notify_channels:         Array.isArray(src.notify_channels) ? src.notify_channels : [],
       // Multi-field
       is_multi_field:         src.is_multi_field         || false,
       multi_field_condition:  src.multi_field_condition  || '',
