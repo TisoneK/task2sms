@@ -410,10 +410,12 @@ def _check_condition(value: Optional[str], operator: Optional[str],
 # ── Multi-field extraction ────────────────────────────────────────────────────
 
 def _apply_normalization(value, normalization):
-    if value is None or not normalization:
+    if value is None or not normalization or normalization == 'none':
         return None
     if normalization == 'extract_numbers':
         return _clean_numeric_string(value)
+    if normalization == 'strip_whitespace':
+        return value.strip() if value else value
     return None
 
 
@@ -631,6 +633,13 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
 
             # Flush log to get its id, then persist field results
             await db.flush()
+            
+            # Defensive: Clear any existing field results for this check log to prevent duplicates
+            from sqlalchemy import delete
+            await db.execute(
+                delete(FieldResult).where(FieldResult.check_log_id == log.id)
+            )
+            
             for fr in field_results_data:
                 db.add(FieldResult(
                     check_log_id=log.id,

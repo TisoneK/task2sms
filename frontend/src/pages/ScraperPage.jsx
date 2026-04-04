@@ -171,6 +171,7 @@ function validateStep(step, form, recipientInput) {
       for (const f of validFields) {
         if (!f.name.trim()) return 'Each field must have a name'
         if (!f.selector.trim()) return `Field "${f.name}" is missing a selector`
+        if (!f.normalization) return `Field "${f.name}" requires normalization selection`
         if (!/^[a-z][a-z0-9_]{2,49}$/.test(f.name))
           return `Field name "${f.name}" must start with a lowercase letter and contain only lowercase letters, digits, and underscores (3–50 characters)`
       }
@@ -877,7 +878,12 @@ function MonitorModal({ onClose, onSave, initial }) {
                             {field.normalization && (
                               <div>
                                 <p style={{ color: 'var(--muted-foreground)' }}>Normalization</p>
-                                <p className="font-semibold" style={{ color: 'var(--foreground)' }}>{field.normalization}</p>
+                                <p className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                                  {field.normalization === 'none' ? 'None (raw text)' :
+                                   field.normalization === 'extract_numbers' ? 'Extract numbers' :
+                                   field.normalization === 'strip_whitespace' ? 'Strip whitespace' :
+                                   field.normalization}
+                                </p>
                               </div>
                             )}
                           </div>
@@ -886,8 +892,26 @@ function MonitorModal({ onClose, onSave, initial }) {
                             style={{ background: 'color-mix(in srgb, #16a34a 10%, transparent)', border: '1px solid #16a34a' }}>
                             <span>
                               ✓ <strong className="font-mono">{field.testResult.value}</strong>
-                              {field.testResult.normalized_value != null && (
+                              {field.testResult.normalized_value != null ? (
                                 <span style={{ color: 'var(--muted-foreground)' }}> → {field.testResult.normalized_value}</span>
+                              ) : (
+                                <>
+                                  <span className="text-xs font-bold" style={{ color: 'var(--destructive)' }}>—</span>
+                                  <button
+                                    onClick={() => toast(`Normalization Needed for "${field.name}"
+
+The field contains numeric data but normalization is not configured. This can cause conditions to fail.
+
+To fix: Set "Normalization" to "Extract numbers" in the field settings.`, {
+                                      duration: 6000,
+                                      icon: 'ℹ️'
+                                    })}
+                                    className="btn-primary text-xs px-1 py-0.5 ml-1"
+                                    title="Fix normalization"
+                                  >
+                                    Fix
+                                  </button>
+                                </>
                               )}
                               <span style={{ color: 'var(--muted-foreground)' }}> · {field.testResult.extraction_time_ms}ms</span>
                             </span>
@@ -962,12 +986,14 @@ function MonitorModal({ onClose, onSave, initial }) {
                               placeholder="href, value, data-price" />
                           </div>
                           <div>
-                            <label className="label">Normalization</label>
+                            <label className="label">Normalization *</label>
                             <select className="input text-xs" value={field.normalization}
-                              onChange={e => updateField(idx, { normalization: e.target.value })}>
-                              <option value="">None (raw text)</option>
+                              onChange={e => updateField(idx, { normalization: e.target.value })}
+                              required>
+                              <option value="">Select normalization...</option>
+                              <option value="none">None (raw text)</option>
                               <option value="extract_numbers">Extract numbers</option>
-                              <option value="strip">Strip whitespace</option>
+                              <option value="strip_whitespace">Strip whitespace</option>
                             </select>
                           </div>
                         </div>
@@ -1688,7 +1714,27 @@ function LogDrawer({ monitor, onLogsChange }) {
                               {fr.success ? (fr.raw_value || '—') : <span style={{ fontStyle: 'italic' }}>{fr.error_message || 'no value'}</span>}
                             </td>
                             <td className="px-3 py-1.5 font-mono" style={{ color: 'var(--muted-foreground)' }}>
-                              {fr.normalized_value != null ? fr.normalized_value : '—'}
+                              {fr.normalized_value != null ? (
+                                fr.normalized_value
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold" style={{ color: 'var(--destructive)' }}>—</span>
+                                  <button
+                                    onClick={() => toast(`Normalization Needed for "${fr.field_name}"
+
+The field contains numeric data (${fr.rawValue}) but normalization is not configured. This can cause conditions to fail.
+
+To fix: Edit this monitor and set "Normalization" to "Extract numbers" for this field.`, {
+                                      duration: 8000,
+                                      icon: 'ℹ️'
+                                    })}
+                                    className="btn-primary text-xs px-2 py-1"
+                                    title={`Learn how to fix normalization for ${fr.field_name}`}
+                                  >
+                                    Fix
+                                  </button>
+                                </div>
+                              )}
                             </td>
                             <td className="px-3 py-1.5 text-right" style={{ color: 'var(--muted-foreground)' }}>
                               {fr.extraction_time_ms != null ? `${fr.extraction_time_ms}ms` : '—'}

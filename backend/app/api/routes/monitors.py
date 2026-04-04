@@ -247,7 +247,8 @@ async def create_monitor(body: MonitorCreate,
             db.add(mf)
 
     await db.commit()
-    await db.refresh(m)
+    from sqlalchemy.orm import selectinload
+    await db.refresh(m, ["fields"])
     from app.workers.scheduler import schedule_monitor
     schedule_monitor(m)
     await db.commit()  # persist next_run_at written by schedule_monitor
@@ -325,7 +326,8 @@ async def update_monitor(mid: int, body: MonitorUpdate,
     for k, v in update_data.items():
         setattr(m, k, v)
     await db.commit()
-    await db.refresh(m)
+    from sqlalchemy.orm import selectinload
+    await db.refresh(m, ["fields"])
     from app.workers.scheduler import schedule_monitor
     schedule_monitor(m)
     await db.commit()  # persist next_run_at written by schedule_monitor
@@ -406,7 +408,8 @@ async def clone_monitor(mid: int, db: AsyncSession = Depends(get_db),
     )
     db.add(clone)
     await db.commit()
-    await db.refresh(clone)
+    from sqlalchemy.orm import selectinload
+    await db.refresh(clone, ["fields"])
     return _out(clone)
 
 
