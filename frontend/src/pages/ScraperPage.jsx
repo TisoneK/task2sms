@@ -41,6 +41,32 @@ const INTERVAL_UNITS = [
   { value: 'days',    label: 'Days',    min: 1,   max: 30    },
 ]
 
+// Field name suggestions from backend
+const FIELD_SUGGESTIONS = {
+  sports: ['home_score', 'away_score', 'total_score', 'match_status', 'game_time', 'quarter', 'team_name', 'player_name'],
+  finance: ['bid_price', 'ask_price', 'volume', 'market_cap', 'change_percent', 'opening_price', 'closing_price', 'spread'],
+  ecommerce: ['price', 'stock_level', 'rating', 'reviews_count', 'availability', 'discount_price', 'brand', 'sku'],
+  weather: ['temperature', 'humidity', 'pressure', 'wind_speed', 'visibility', 'uv_index', 'precipitation', 'feels_like'],
+}
+
+const PREFIX_SUGGESTIONS = {
+  home: ['home_score', 'home_team', 'home_points'],
+  away: ['away_score', 'away_team', 'away_points'],
+  price: ['price', 'bid_price', 'ask_price', 'discount_price'],
+  stock: ['stock_level', 'stock_status', 'stock_count'],
+  score: ['score', 'total_score', 'home_score', 'away_score'],
+  team: ['team_name', 'team_score', 'team_abbreviation'],
+  bid: ['bid_price', 'bid_size'],
+  ask: ['ask_price', 'ask_size'],
+  temp: ['temperature', 'temp_high', 'temp_low'],
+  wind: ['wind_speed', 'wind_direction'],
+  change: ['change_percent', 'change_amount'],
+  total: ['total_score', 'total_price', 'total_count'],
+  open: ['opening_price', 'open_interest'],
+  close: ['closing_price', 'close_time'],
+  vol: ['volume', 'volatility'],
+}
+
 const STATUS_COLOR = {
   active: { dot: '#16a34a', badge: 'badge-green' },
   paused: { dot: '#d97706', badge: 'badge-yellow' },
@@ -66,6 +92,10 @@ const EMPTY_FORM = {
   time_window_start: '', time_window_end: '', skip_weekends: false,
   retry_attempts: 3, timeout_seconds: 30, max_failures_before_pause: 10,
   tags: '',
+  // Multi-element fields
+  is_multi_field: false,
+  multi_field_condition: '',
+  fields: [{ name: '', selector: '', selector_type: 'css', attribute: '', normalization: '', position: 0, tested: false, testResult: null }],
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -134,8 +164,21 @@ function validateStep(step, form, recipientInput) {
   if (step === 'basic') {
     if (!form.name.trim())     return 'Monitor name is required'
     if (!form.url.trim())      return 'URL is required'
-    if (!form.selector.trim()) return 'Selector is required'
     try { new URL(form.url) } catch { return 'URL must be a valid web address' }
+    if (form.is_multi_field) {
+      const validFields = form.fields.filter(f => f.name.trim() || f.selector.trim())
+      if (validFields.length === 0) return 'Add at least one field with a name and selector'
+      for (const f of validFields) {
+        if (!f.name.trim()) return 'Each field must have a name'
+        if (!f.selector.trim()) return `Field "${f.name}" is missing a selector`
+        if (!/^[a-z][a-z0-9_]{2,49}$/.test(f.name))
+          return `Field name "${f.name}" must start with a lowercase letter and contain only lowercase letters, digits, and underscores (3–50 characters)`
+      }
+      const names = validFields.map(f => f.name)
+      if (new Set(names).size !== names.length) return 'Field names must be unique'
+    } else {
+      if (!form.selector.trim()) return 'Selector is required'
+    }
   }
   if (step === 'schedule') {
     if (form.schedule_type === 'interval' && !(form.check_interval_minutes >= 1))
@@ -148,6 +191,87 @@ function validateStep(step, form, recipientInput) {
     if (recipients.length === 0) return 'At least one recipient is required'
   }
   return null
+}
+
+// Field name autocomplete input
+function FieldNameInput({ value, onChange, existingNames = [] }) {
+  const [suggestions, setSuggestions] = useState([])
+  const [focused, setFocused] = useState(false)
+  const timerRef = useRef(null)
+
+  const getAutocompleteSuggestions = (prefix) => {
+    const results = []
+    const firstWord = prefix.split('_')[0]
+    
+    if (firstWord in PREFIX_SUGGESTIONS) {
+      results.push(...PREFIX_SUGGESTIONS[firstWord])
+    }
+    
+    // Also check if any suggestion starts with full prefix
+    for (const suggestions of Object.values(PREFIX_SUGGESTIONS)) {
+      for (const s of suggestions) {
+        if (s.startsWith(prefix) && !results.includes(s)) {
+          results.push(s)
+        }
+      }
+    }
+    
+    // Filter out already used names
+    return results.filter(name => !existingNames.includes(name)).slice(0, 6)
+  }
+
+  const handleChange = (e) => {
+    const val = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_')
+    onChange(val)
+    
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      if (val.length >= 2) {
+        setSuggestions(getAutocompleteSuggestions(val))
+      } else {
+        setSuggestions([])
+      }
+    }, 150)
+  }
+
+  const pickSuggestion = (name) => {
+    onChange(name)
+    setSuggestions([])
+  }
+
+  return (
+    <div className="relative">
+      <input
+        className="input font-mono text-sm"
+        value={value}
+        onChange={handleChange}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        placeholder="home_score, price, temperature…" 
+      />
+      {focused && suggestions.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 rounded-xl overflow-hidden shadow-lg"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+          {suggestions.map(name => (
+            <button key={name} type="button"
+              onMouseDown={() => pickSuggestion(name)}
+              className="w-full flex items-center justify-between px-3 py-2 text-sm text-left"
+              style={{ borderBottom: '1px solid var(--border)' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--muted)'}
+              onMouseLeave={e => e.currentTarget.style.background = ''}>
+              <span style={{ color: 'var(--foreground)' }}>{name}</span>
+              <span className="text-xs ml-2" style={{ color: 'var(--muted-foreground)' }}>
+                Suggested
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="text-[10px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+        Lowercase, underscores only — used in condition expression
+      </p>
+    </div>
+  )
 }
 
 // Contact autocomplete input
@@ -248,6 +372,17 @@ function MonitorModal({ onClose, onSave, initial }) {
       time_window_start:      src.time_window_start      || '',
       time_window_end:        src.time_window_end        || '',
       skip_weekends:          src.skip_weekends          || false,
+      // Multi-field
+      is_multi_field:         src.is_multi_field         || false,
+      multi_field_condition:  src.multi_field_condition  || '',
+      fields: Array.isArray(src.fields) && src.fields.length > 0
+        ? src.fields.map(f => ({
+            name: f.name || '', selector: f.selector || '',
+            selector_type: f.selector_type || 'css', attribute: f.attribute || '',
+            normalization: f.normalization || '', position: f.position || 0,
+            tested: f.tested || false, testResult: f.testResult || null,
+          }))
+        : EMPTY_FORM.fields,
     }
   }
 
@@ -277,6 +412,10 @@ function MonitorModal({ onClose, onSave, initial }) {
   const [testResult,     setTestResult]     = useState(null)
   const [testing,        setTesting]        = useState(false)
   const [showPicker,     setShowPicker]     = useState(false)
+  const [pickingFieldIdx, setPickingFieldIdx] = useState(null)  // Track which field is being picked
+  const [multiTestResult, setMultiTestResult] = useState(null)
+  const [multiTesting,    setMultiTesting]   = useState(false)
+  const [fieldNameErrors, setFieldNameErrors] = useState({})  // index → error string
 
   useEffect(() => {
     document.body.style.overflow = 'hidden'
@@ -331,20 +470,136 @@ function MonitorModal({ onClose, onSave, initial }) {
   }
 
   const handlePickerSelect = ({ selector, value, value_type, suggested_operator }) => {
-    setForm(f => ({
-      ...f,
-      selector,
-      selector_type: 'css',
-      condition_operator: suggested_operator || f.condition_operator,
-    }))
-    setTestResult({
-      value,
-      diagnosis: value ? 'Extracted from picker' : 'Element found but no text value',
-      used_playwright: true,
-      duration_ms: null,
-      error: null,
-    })
+    if (pickingFieldIdx !== null) {
+      // Multi-field mode - update the specific field
+      updateField(pickingFieldIdx, { selector, selector_type: 'css' })
+    } else {
+      // Single-field mode
+      setForm(f => ({
+        ...f,
+        selector,
+        selector_type: 'css',
+        condition_operator: suggested_operator || f.condition_operator,
+      }))
+      setTestResult({
+        value,
+        diagnosis: value ? 'Extracted from picker' : 'Element found but no text value',
+        used_playwright: true,
+        duration_ms: null,
+        error: null,
+      })
+    }
+    setPickingFieldIdx(null)
     setShowPicker(false)
+  }
+
+  // ── Multi-field helpers ──────────────────────────────────────────────────
+  const updateField = (idx, patch) => setForm(f => {
+    const fields = f.fields.map((field, i) => i === idx ? { ...field, ...patch } : field)
+    return { ...f, fields }
+  })
+
+  const addField = () => setForm(f => ({
+    ...f,
+    fields: [...f.fields, { name: '', selector: '', selector_type: 'css', attribute: '', normalization: '', position: f.fields.length, tested: false, testResult: null }]
+  }))
+
+  const removeField = (idx) => setForm(f => ({
+    ...f,
+    fields: f.fields.filter((_, i) => i !== idx)
+  }))
+
+  const startEditingField = (idx) => {
+    updateField(idx, { tested: false, testResult: null })
+  }
+
+  const deleteField = (idx) => {
+    removeField(idx)
+  }
+
+  const handleMultiTest = async () => {
+    const validFields = form.fields.filter(f => f.name.trim() && f.selector.trim())
+    if (!validFields.length || !form.url) return
+    setMultiTesting(true); setMultiTestResult(null)
+    try {
+      const { monitorsApi } = await import('../services/api')
+      const { data } = await monitorsApi.testMultiFields({
+        url: form.url,
+        use_playwright: form.use_playwright,
+        wait_ms: form.wait_ms || 3000,
+        fields: validFields.map(f => ({
+          name: f.name, selector: f.selector,
+          selector_type: f.selector_type, attribute: f.attribute || null,
+          normalization: f.normalization || null, position: 0,
+        })),
+      })
+      setMultiTestResult(data)
+    } catch (err) {
+      setMultiTestResult({ success: false, error: 'Test failed', fields: [] })
+    } finally { setMultiTesting(false) }
+  }
+
+  const handleSingleFieldTest = async (fieldIdx) => {
+    const field = form.fields[fieldIdx]
+    if (!field.name.trim() || !field.selector.trim() || !form.url) return
+    
+    try {
+      const { monitorsApi } = await import('../services/api')
+      const { data } = await monitorsApi.testMultiFields({
+        url: form.url,
+        use_playwright: form.use_playwright,
+        wait_ms: form.wait_ms || 3000,
+        fields: [{
+          name: field.name, selector: field.selector,
+          selector_type: field.selector_type, attribute: field.attribute || null,
+          normalization: field.normalization || null, position: 0,
+        }],
+      })
+      
+      // Update the field with test result and mark as tested
+      updateField(fieldIdx, {
+        tested: data.fields[0].success,
+        testResult: data.fields[0]
+      })
+      
+      // Update the overall multi-test result
+      const updatedFields = (multiTestResult?.fields || []).filter(f => f.name !== field.name)
+      updatedFields.push(data.fields[0])
+      
+      setMultiTestResult({
+        success: data.success,
+        error: data.error,
+        fields: updatedFields
+      })
+    } catch (err) {
+      // Update the field with error result
+      updateField(fieldIdx, {
+        tested: false,
+        testResult: {
+          name: field.name,
+          success: false,
+          error: 'Test failed',
+          diagnosis: 'Request error',
+          value: null
+        }
+      })
+      
+      // Update the overall multi-test result
+      const updatedFields = (multiTestResult?.fields || []).filter(f => f.name !== field.name)
+      updatedFields.push({
+        name: field.name,
+        success: false,
+        error: 'Test failed',
+        diagnosis: 'Request error',
+        value: null
+      })
+      
+      setMultiTestResult({
+        success: false,
+        error: 'Test failed',
+        fields: updatedFields
+      })
+    }
   }
 
   const goNext = () => {
@@ -371,7 +626,7 @@ function MonitorModal({ onClose, onSave, initial }) {
     try {
       const recipients = recipientInput.split(',').map(s => s.trim()).filter(Boolean)
       const tags = form.tags ? form.tags.split(',').map(s => s.trim()).filter(Boolean) : []
-      await onSave({
+      const payload = {
         ...form,
         notify_recipients: recipients,
         attribute:              form.attribute              || null,
@@ -384,10 +639,21 @@ function MonitorModal({ onClose, onSave, initial }) {
         time_window_start:      form.time_window_start      || null,
         time_window_end:        form.time_window_end        || null,
         tags,
-        // Include new behavior fields
-        stop_on_condition_met: form.stop_on_condition_met,
-        skip_initial_notification: form.skip_initial_notification,
-      })
+        stop_on_condition_met:      form.stop_on_condition_met,
+        skip_initial_notification:  form.skip_initial_notification,
+        is_multi_field:             form.is_multi_field,
+        multi_field_condition:      form.is_multi_field ? (form.multi_field_condition || null) : null,
+        fields: form.is_multi_field
+          ? form.fields
+              .filter(f => f.name.trim() && f.selector.trim())
+              .map((f, i) => ({ ...f, position: i, attribute: f.attribute || null, normalization: f.normalization || null }))
+          : [],
+      }
+      // In single-field mode, selector is required; in multi-field mode, use a placeholder
+      if (form.is_multi_field) {
+        payload.selector = payload.selector || '__multi_field__'
+      }
+      await onSave(payload)
       clearDraft()
       onClose()
     } catch (err) {
@@ -523,233 +789,464 @@ function MonitorModal({ onClose, onSave, initial }) {
                   placeholder="https://example.com/product" />
               </div>
 
-              {/* Selector section */}
-              <div className="rounded-xl p-4 space-y-3"
-                style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider"
-                      style={{ color: 'var(--muted-foreground)' }}>Element / Expression</p>
-                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                      Click "Pick" to select visually, or type a selector manually
-                    </p>
-                  </div>
-                  <div className="flex gap-2 shrink-0">
-                    <button type="button"
-                      onClick={() => {
-                        if (!form.url) { setStepError('Enter a URL first'); return }
-                        try { new URL(form.url) } catch { setStepError('Enter a valid URL first'); return }
-                        setStepError(null); setShowPicker(true)
-                      }}
-                      className="btn-primary text-xs px-3 py-1.5">
-                      Pick
-                    </button>
-                    <button type="button" onClick={handleTest}
-                      disabled={testing || !form.url || !form.selector}
-                      className="btn-secondary text-xs px-3 py-1.5">
-                      {testing ? 'Testing…' : 'Test'}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="label">Selector type</label>
-                  <select className="input" value={form.selector_type} onChange={set('selector_type')}>
-                    {SELECTOR_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                  </select>
-                </div>
-
-                {/* JS Expression help */}
-                {form.selector_type === 'js_expr' && (
-                  <div className="rounded-lg px-3 py-2.5 text-xs space-y-1.5"
-                    style={{ background: 'color-mix(in srgb, #7c3aed 8%, transparent)', border: '1px solid #7c3aed44' }}>
-                    <p className="font-semibold" style={{ color: '#7c3aed' }}>
-                      <Code2 size={10} className="inline mr-1" />JS Expression — multi-element math
-                    </p>
-                    <p style={{ color: 'var(--muted-foreground)' }}>
-                      Combine values from multiple DOM elements using arithmetic:
-                    </p>
-                    <ul className="space-y-0.5 font-mono text-[10px]" style={{ color: 'var(--foreground)' }}>
-                      <li><strong>css('.score-a') + css('.score-b')</strong> — sum two scores</li>
-                      <li><strong>css('.price') + css('.tax')</strong> — total price</li>
-                      <li><strong>css('.items')[0] + css('.items')[1]</strong> — nth elements</li>
-                      <li><strong>css('input', 'value')</strong> — read input attribute</li>
-                    </ul>
-                    <p style={{ color: 'var(--muted-foreground)' }}>
-                      Currency symbols, commas and spaces are stripped automatically.
-                    </p>
-                  </div>
-                )}
-
-                <div>
-                  <label className="label">Selector</label>
-                  <input className="input font-mono text-sm" value={form.selector} onChange={set('selector')}
-                    placeholder={selType?.placeholder} />
-                </div>
-
-                {form.selector_type === 'css' && (
-                  <div>
-                    <label className="label">
-                      Attribute{' '}
-                      <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(blank = inner text)</span>
-                    </label>
-                    <input className="input font-mono text-sm" value={form.attribute} onChange={set('attribute')}
-                      placeholder="value, href, data-price" />
-                  </div>
-                )}
-
-                {/* Selector tips */}
-                <p className="text-[11px] rounded-lg px-3 py-2"
-                  style={{ background: 'color-mix(in srgb, var(--primary) 6%, transparent)', color: 'var(--muted-foreground)' }}>
-                  {form.selector_type === 'css'     && 'DevTools → right-click element → Copy → Copy selector'}
-                  {form.selector_type === 'xpath'   && 'DevTools → right-click element → Copy → Copy XPath'}
-                  {form.selector_type === 'text'    && 'Paste the exact text you want to detect on the page'}
-                  {form.selector_type === 'regex'   && 'Use a capture group e.g. (\\d+) to extract a number'}
-                  {form.selector_type === 'js_expr' && 'Use css(\'selector\') + css(\'selector\') to combine values'}
-                </p>
-
-                {/* Test result */}
-                {testResult && (
-                  <div className="rounded-lg px-3 py-2.5 text-xs space-y-1"
-                    style={{
-                      background: testResult.error ? 'color-mix(in srgb, var(--destructive) 10%, transparent)'
-                        : testResult.value ? 'color-mix(in srgb, #16a34a 10%, transparent)'
-                        : 'color-mix(in srgb, #d97706 10%, transparent)',
-                      border: `1px solid ${testResult.error ? 'var(--destructive)' : testResult.value ? '#16a34a' : '#d97706'}`,
-                    }}>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold">
-                        {testResult.error ? '⚠ Error' : testResult.value ? '✓ Value found' : '⚠ No value'}
-                      </span>
-                      <span style={{ color: 'var(--muted-foreground)' }}>
-                        {testResult.duration_ms != null ? (
-                          testResult.duration_ms < 1000 ? `${testResult.duration_ms}ms` : `${(testResult.duration_ms / 1000).toFixed(1)}s`
-                        ) : ''}
-                        {testResult.used_playwright ? ' · Playwright' : ''}
-                      </span>
-                    </div>
-                    {testResult.value && (
-                      <p className="font-mono font-semibold" style={{ color: 'var(--foreground)' }}>
-                        "{testResult.value}"
-                      </p>
-                    )}
-                    <p style={{ color: 'var(--muted-foreground)' }}>{testResult.diagnosis}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Separate monitor selector */}
-              <div className="rounded-xl p-4 space-y-3"
+              {/* ── Multi-Element Fields toggle ── */}
+              <div className="rounded-xl p-4"
                 style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>Separate monitor element</p>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>
+                      Multi-Element Fields
+                    </p>
                     <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                      Use a different selector to compare the condition, while extracting data from the main selector
+                      Extract multiple named values in a single page load and combine them in a condition
                     </p>
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer shrink-0">
                     <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
-                      checked={form.use_monitor_selector} onChange={setChk('use_monitor_selector')} />
+                      checked={form.is_multi_field}
+                      onChange={e => {
+                        setForm(f => ({ ...f, is_multi_field: e.target.checked }))
+                        setMultiTestResult(null)
+                      }} />
                     <span className="text-sm" style={{ color: 'var(--foreground)' }}>Enable</span>
                   </label>
                 </div>
-                {form.use_monitor_selector && (
-                  <div className="space-y-3">
+              </div>
+
+              {/* ── MULTI-FIELD UI ── */}
+              {form.is_multi_field ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+                      Fields ({form.fields.filter(f => f.name || f.selector).length} configured)
+                    </p>
+                    <button type="button" onClick={handleMultiTest}
+                      disabled={multiTesting || !form.url || !form.fields.some(f => f.name && f.selector)}
+                      className="btn-secondary text-xs px-3 py-1.5">
+                      {multiTesting ? 'Testing…' : 'Test All Fields'}
+                    </button>
+                  </div>
+
+                  {form.fields.map((field, idx) => {
+                    // Show card if field has been successfully tested
+                    if (field.tested && field.testResult?.success) {
+                      return (
+                        <div key={idx} className="rounded-xl p-4 space-y-3"
+                          style={{ background: 'color-mix(in srgb, #16a34a 8%, var(--muted))', border: '1px solid #16a34a33' }}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+                                style={{ background: '#16a34a', color: '#fff' }}>Field {idx + 1}</span>
+                              <span className="text-xs font-semibold text-emerald-600">✓ Tested</span>
+                            </div>
+                            <div className="flex gap-1">
+                              <button type="button" onClick={() => startEditingField(idx)}
+                                className="btn-secondary text-xs px-2 py-1">
+                                Edit
+                              </button>
+                              {form.fields.length > 1 && (
+                                <button type="button" onClick={() => deleteField(idx)}
+                                  className="btn-ghost p-1" style={{ color: 'var(--destructive)' }}>
+                                  <X size={13} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 text-xs">
+                            <div>
+                              <p style={{ color: 'var(--muted-foreground)' }}>Field Name</p>
+                              <p className="font-mono font-semibold" style={{ color: 'var(--foreground)' }}>{field.name}</p>
+                            </div>
+                            <div>
+                              <p style={{ color: 'var(--muted-foreground)' }}>Type</p>
+                              <p className="font-semibold" style={{ color: 'var(--foreground)' }}>
+                                {SELECTOR_TYPES.find(s => s.value === field.selector_type)?.label || field.selector_type}
+                              </p>
+                            </div>
+                            <div className="col-span-2">
+                              <p style={{ color: 'var(--muted-foreground)' }}>Selector</p>
+                              <p className="font-mono text-xs break-all" style={{ color: 'var(--foreground)' }}>{field.selector}</p>
+                            </div>
+                            {field.attribute && (
+                              <div>
+                                <p style={{ color: 'var(--muted-foreground)' }}>Attribute</p>
+                                <p className="font-mono" style={{ color: 'var(--foreground)' }}>{field.attribute}</p>
+                              </div>
+                            )}
+                            {field.normalization && (
+                              <div>
+                                <p style={{ color: 'var(--muted-foreground)' }}>Normalization</p>
+                                <p className="font-semibold" style={{ color: 'var(--foreground)' }}>{field.normalization}</p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="rounded-lg px-3 py-2 text-xs"
+                            style={{ background: 'color-mix(in srgb, #16a34a 10%, transparent)', border: '1px solid #16a34a' }}>
+                            <span>
+                              ✓ <strong className="font-mono">{field.testResult.value}</strong>
+                              {field.testResult.normalized_value != null && (
+                                <span style={{ color: 'var(--muted-foreground)' }}> → {field.testResult.normalized_value}</span>
+                              )}
+                              <span style={{ color: 'var(--muted-foreground)' }}> · {field.testResult.extraction_time_ms}ms</span>
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    // Show form for untested fields
+                    return (
+                      <div key={idx} className="rounded-xl p-3 space-y-2"
+                        style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+                            style={{ background: 'var(--primary)', color: '#fff' }}>Field {idx + 1}</span>
+                          {form.fields.length > 1 && (
+                            <button type="button" onClick={() => deleteField(idx)}
+                              className="btn-ghost p-1" style={{ color: 'var(--destructive)' }}>
+                              <X size={13} />
+                            </button>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="label">Field name</label>
+                          <FieldNameInput
+                            value={field.name}
+                            onChange={(name) => updateField(idx, { name })}
+                            existingNames={form.fields.filter((f, i) => i !== idx && f.name).map(f => f.name)}
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="label">Type</label>
+                            <select className="input text-xs" value={field.selector_type}
+                              onChange={e => updateField(idx, { selector_type: e.target.value })}>
+                              {SELECTOR_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                            </select>
+                          </div>
+                          <div className="col-span-2">
+                            <label className="label">Selector</label>
+                            <div className="flex gap-2">
+                              <input className="input font-mono text-xs flex-1" value={field.selector}
+                                onChange={e => updateField(idx, { selector: e.target.value })}
+                                placeholder="div.score, //span[@class='val']…" />
+                              <button type="button"
+                                onClick={() => {
+                                  if (!form.url) { setStepError('Enter a URL first'); return }
+                                  try { new URL(form.url) } catch { setStepError('Enter a valid URL first'); return }
+                                  setStepError(null); 
+                                  setPickingFieldIdx(idx)
+                                  setShowPicker(true)
+                                }}
+                                className="btn-primary text-xs px-3 py-1.5 whitespace-nowrap">
+                                Pick
+                              </button>
+                              <button type="button" onClick={() => handleSingleFieldTest(idx)}
+                                disabled={!form.url || !field.selector}
+                                className="btn-secondary text-xs px-3 py-1.5 whitespace-nowrap">
+                                Test
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="label">Attribute <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(opt)</span></label>
+                            <input className="input font-mono text-xs" value={field.attribute}
+                              onChange={e => updateField(idx, { attribute: e.target.value })}
+                              placeholder="href, value, data-price" />
+                          </div>
+                          <div>
+                            <label className="label">Normalization</label>
+                            <select className="input text-xs" value={field.normalization}
+                              onChange={e => updateField(idx, { normalization: e.target.value })}>
+                              <option value="">None (raw text)</option>
+                              <option value="extract_numbers">Extract numbers</option>
+                              <option value="strip">Strip whitespace</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {field.testResult && !field.testResult.success && (
+                          <div className="rounded-lg px-2 py-1.5 text-xs"
+                            style={{ background: 'color-mix(in srgb, var(--destructive) 10%, transparent)', border: '1px solid var(--destructive)' }}>
+                            <span style={{ color: 'var(--destructive)' }}>
+                              ✗ {field.testResult.diagnosis || field.testResult.error || 'No value found'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  <button type="button" onClick={addField}
+                    className="w-full btn-secondary text-xs py-2 flex items-center justify-center gap-1">
+                    <Plus size={12} /> Add Field
+                  </button>
+
+                  {multiTestResult && (
+                    <div className="rounded-lg px-3 py-2 text-xs"
+                      style={{
+                        background: multiTestResult.success ? 'color-mix(in srgb, var(--primary) 8%, transparent)' : 'color-mix(in srgb, var(--destructive) 8%, transparent)',
+                        border: `1px solid ${multiTestResult.success ? 'var(--primary)' : 'var(--destructive)'}`,
+                      }}>
+                      {multiTestResult.success
+                        ? <span>✓ {multiTestResult.fields.filter(f => f.success).length}/{multiTestResult.fields.length} fields extracted
+                            {' '}· {multiTestResult.duration_ms}ms{multiTestResult.used_playwright ? ' · Playwright' : ''}</span>
+                        : <span style={{ color: 'var(--destructive)' }}>✗ {multiTestResult.error}</span>
+                      }
+                    </div>
+                  )}
+
+                  {/* Condition builder */}
+                  <div className="space-y-1.5">
+                    <label className="label">
+                      Condition expression{' '}
+                      <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(optional — leave blank to always trigger)</span>
+                    </label>
+                    <input className="input font-mono text-sm"
+                      value={form.multi_field_condition}
+                      onChange={set('multi_field_condition')}
+                      placeholder={
+                        form.fields.filter(f => f.name).length >= 2
+                          ? `${form.fields[0]?.name} + ${form.fields[1]?.name} > 150`
+                          : 'home_score + away_score > 150'
+                      } />
+                    <div className="rounded-lg px-3 py-2 text-[11px] space-y-1"
+                      style={{ background: 'color-mix(in srgb, #7c3aed 6%, transparent)', border: '1px solid #7c3aed33' }}>
+                      <p className="font-semibold" style={{ color: '#7c3aed' }}>
+                        Available fields: {form.fields.filter(f => f.name).map(f => f.name).join(', ') || '—'}
+                      </p>
+                      <ul className="font-mono space-y-0.5 text-[10px]" style={{ color: 'var(--foreground)' }}>
+                        <li>home_score + away_score &gt; 150</li>
+                        <li>Math.abs(bid_price - ask_price) &lt; 0.01</li>
+                        <li>price &lt; 100 &amp;&amp; stock == 'In Stock'</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* ── SINGLE-FIELD MODE ── */
+                <div className="space-y-4">
+                  <div className="rounded-xl p-4 space-y-3"
+                    style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wider"
+                          style={{ color: 'var(--muted-foreground)' }}>Element / Expression</p>
+                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                          Click "Pick" to select visually, or type a selector manually
+                        </p>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button type="button"
+                          onClick={() => {
+                            if (!form.url) { setStepError('Enter a URL first'); return }
+                            try { new URL(form.url) } catch { setStepError('Enter a valid URL first'); return }
+                            setStepError(null); 
+                            setPickingFieldIdx(null)
+                            setShowPicker(true)
+                          }}
+                          className="btn-primary text-xs px-3 py-1.5">Pick</button>
+                        <button type="button" onClick={handleTest}
+                          disabled={testing || !form.url || !form.selector}
+                          className="btn-secondary text-xs px-3 py-1.5">
+                          {testing ? 'Testing…' : 'Test'}
+                        </button>
+                      </div>
+                    </div>
+
                     <div>
-                      <label className="label">Monitor selector type</label>
-                      <select className="input" value={form.monitor_selector_type}
-                        onChange={set('monitor_selector_type')}>
+                      <label className="label">Selector type</label>
+                      <select className="input" value={form.selector_type} onChange={set('selector_type')}>
                         {SELECTOR_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <label className="label">Monitor selector</label>
-                      <input className="input font-mono text-sm" value={form.monitor_selector}
-                        onChange={set('monitor_selector')} placeholder=".price-display" />
-                    </div>
-                  </div>
-                )}
-              </div>
 
-              {/* Playwright toggle */}
-              <div className="rounded-xl p-4 space-y-3"
-                style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>Dynamic page (Playwright)</p>
-                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
-                      Enable for React, Vue, Angular, Amazon, or any JS-rendered content
+                    {form.selector_type === 'js_expr' && (
+                      <div className="rounded-lg px-3 py-2.5 text-xs space-y-1.5"
+                        style={{ background: 'color-mix(in srgb, #7c3aed 8%, transparent)', border: '1px solid #7c3aed44' }}>
+                        <p className="font-semibold" style={{ color: '#7c3aed' }}>
+                          <Code2 size={10} className="inline mr-1" />JS Expression — multi-element math
+                        </p>
+                        <ul className="space-y-0.5 font-mono text-[10px]" style={{ color: 'var(--foreground)' }}>
+                          <li><strong>css('.score-a') + css('.score-b')</strong></li>
+                          <li><strong>css('.price') + css('.tax')</strong></li>
+                          <li><strong>css('.items')[0] + css('.items')[1]</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="label">Selector</label>
+                      <input className="input font-mono text-sm" value={form.selector} onChange={set('selector')}
+                        placeholder={selType?.placeholder} />
+                    </div>
+
+                    {form.selector_type === 'css' && (
+                      <div>
+                        <label className="label">Attribute <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(blank = inner text)</span></label>
+                        <input className="input font-mono text-sm" value={form.attribute} onChange={set('attribute')}
+                          placeholder="value, href, data-price" />
+                      </div>
+                    )}
+
+                    <p className="text-[11px] rounded-lg px-3 py-2"
+                      style={{ background: 'color-mix(in srgb, var(--primary) 6%, transparent)', color: 'var(--muted-foreground)' }}>
+                      {form.selector_type === 'css'     && 'DevTools → right-click element → Copy → Copy selector'}
+                      {form.selector_type === 'xpath'   && 'DevTools → right-click element → Copy → Copy XPath'}
+                      {form.selector_type === 'text'    && 'Paste the exact text you want to detect on the page'}
+                      {form.selector_type === 'regex'   && 'Use a capture group e.g. (\\d+) to extract a number'}
+                      {form.selector_type === 'js_expr' && "Use css('selector') + css('selector') to combine values"}
+                    </p>
+
+                    {testResult && (
+                      <div className="rounded-lg px-3 py-2.5 text-xs space-y-1"
+                        style={{
+                          background: testResult.error ? 'color-mix(in srgb, var(--destructive) 10%, transparent)'
+                            : testResult.value ? 'color-mix(in srgb, #16a34a 10%, transparent)'
+                            : 'color-mix(in srgb, #d97706 10%, transparent)',
+                          border: `1px solid ${testResult.error ? 'var(--destructive)' : testResult.value ? '#16a34a' : '#d97706'}`,
+                        }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold">
+                            {testResult.error ? '⚠ Error' : testResult.value ? '✓ Value found' : '⚠ No value'}
+                          </span>
+                          <span style={{ color: 'var(--muted-foreground)' }}>
+                            {testResult.duration_ms != null ? (
+                              testResult.duration_ms < 1000 ? `${testResult.duration_ms}ms` : `${(testResult.duration_ms / 1000).toFixed(1)}s`
+                            ) : ''}{testResult.used_playwright ? ' · Playwright' : ''}
+                          </span>
+                        </div>
+                        {testResult.value && (
+                          <p className="font-mono font-semibold" style={{ color: 'var(--foreground)' }}>"{testResult.value}"</p>
+                        )}
+                        <p style={{ color: 'var(--muted-foreground)' }}>{testResult.diagnosis}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Separate monitor selector */}
+                  <div className="rounded-xl p-4 space-y-3"
+                    style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>Separate monitor element</p>
+                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                          Use a different selector for the condition trigger
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer shrink-0">
+                        <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
+                          checked={form.use_monitor_selector} onChange={setChk('use_monitor_selector')} />
+                        <span className="text-sm" style={{ color: 'var(--foreground)' }}>Enable</span>
+                      </label>
+                    </div>
+                    {form.use_monitor_selector && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="label">Monitor selector type</label>
+                          <select className="input" value={form.monitor_selector_type} onChange={set('monitor_selector_type')}>
+                            {SELECTOR_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label">Monitor selector</label>
+                          <input className="input font-mono text-sm" value={form.monitor_selector}
+                            onChange={set('monitor_selector')} placeholder=".price-display" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Alert condition */}
+                  <div className="space-y-2">
+                    <label className="label">Alert Condition</label>
+                    <div className="flex gap-3">
+                      <div className="flex-1">
+                        <select className="input" value={form.condition_operator} onChange={set('condition_operator')}>
+                          {OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                      </div>
+                      {form.condition_operator !== 'changed' && (
+                        <div className="flex-1">
+                          <input className="input" value={form.condition_value}
+                            onChange={set('condition_value')} placeholder="100" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
+                      For numeric comparisons, currency symbols and commas are stripped automatically
                     </p>
                   </div>
-                  <label className="flex items-center gap-2 cursor-pointer shrink-0">
-                    <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
-                      checked={form.use_playwright} onChange={setChk('use_playwright')} />
-                    <span className="text-sm" style={{ color: 'var(--foreground)' }}>Enable</span>
-                  </label>
                 </div>
-                {form.use_playwright && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="label">Wait for selector (optional)</label>
-                      <input className="input font-mono text-sm" value={form.wait_selector}
-                        onChange={set('wait_selector')} placeholder=".product-price" />
-                    </div>
-                    <div>
-                      <label className="label">Wait time (ms)</label>
-                      <input className="input" type="number" min={500} max={15000}
-                        value={form.wait_ms} onChange={setNum('wait_ms')} />
-                    </div>
-                  </div>
-                )}
-              </div>
+              )}
 
-              {/* Condition */}
-              <div className="space-y-2">
-                <label className="label">Alert Condition</label>
-                <div className="flex gap-3">
-                  <div className="flex-1">
-                    <select className="input" value={form.condition_operator} onChange={set('condition_operator')}>
-                      {OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
+              {/* Playwright toggle (both modes) */}
+              {form.is_multi_field && (
+                <div className="rounded-xl p-4 space-y-3"
+                  style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>Dynamic page (Playwright)</p>
+                      <p className="text-[11px] mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                        Enable for JS-rendered content (React, Vue, Angular, etc.)
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer shrink-0">
+                      <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
+                        checked={form.use_playwright} onChange={setChk('use_playwright')} />
+                      <span className="text-sm" style={{ color: 'var(--foreground)' }}>Enable</span>
+                    </label>
                   </div>
-                  {form.condition_operator !== 'changed' && (
-                    <div className="flex-1">
-                      <input className="input" value={form.condition_value}
-                        onChange={set('condition_value')} placeholder="100" />
+                  {form.use_playwright && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="label">Wait for selector (optional)</label>
+                        <input className="input font-mono text-sm" value={form.wait_selector}
+                          onChange={set('wait_selector')} placeholder=".product-price" />
+                      </div>
+                      <div>
+                        <label className="label">Wait time (ms)</label>
+                        <input className="input" type="number" min={500} max={15000}
+                          value={form.wait_ms} onChange={setNum('wait_ms')} />
+                      </div>
                     </div>
                   )}
                 </div>
-                <p className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
-                  For numeric comparisons, currency symbols and commas are stripped automatically
-                  (e.g. "KES 1,598.02" → 1598.02)
-                </p>
-              </div>
+              )}
 
-              {/* Monitor Behavior */}
+              {/* Monitor Behavior (both modes) */}
               <div className="space-y-3">
                 <label className="label">Monitor Behavior</label>
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
-                      checked={form.stop_on_condition_met} onChange={e => set('stop_on_condition_met')(e.target.checked)} />
-                    <span className="text-sm">Stop monitoring after condition is met (saves tokens)</span>
+                      checked={form.stop_on_condition_met}
+                      onChange={e => setForm(f => ({ ...f, stop_on_condition_met: e.target.checked }))} />
+                    <span className="text-sm">Stop monitoring after condition is met (saves costs)</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
-                      checked={form.skip_initial_notification} onChange={e => set('skip_initial_notification')(e.target.checked)} />
+                      checked={form.skip_initial_notification}
+                      onChange={e => setForm(f => ({ ...f, skip_initial_notification: e.target.checked }))} />
                     <span className="text-sm">Skip notification on first run (initial value check)</span>
                   </label>
                 </div>
                 <p className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
-                  By default, monitors stop after first alert to save costs. 
+                  By default, monitors stop after first alert to save costs.
                   Disable to continue monitoring after each alert.
                 </p>
               </div>
             </div>
           )}
 
-          {/* ── STEP 2: SCHEDULE ── */}
+                    {/* ── STEP 2: SCHEDULE ── */}
           {step === 1 && (
             <div className="space-y-4">
               <div>
@@ -975,6 +1472,8 @@ function LogDrawer({ monitor, onLogsChange }) {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [confirmClear, setConfirmClear] = useState(false)
+  const [expandedFieldLog, setExpandedFieldLog] = useState(null)  // log id → field results
+  const [fieldResultsCache, setFieldResultsCache] = useState({})  // log_id → [{field_name, ...}]
 
   const loadLogs = useCallback(async () => {
     setLoading(true)
@@ -1000,9 +1499,22 @@ function LogDrawer({ monitor, onLogsChange }) {
     try {
       await monitorsApi.clearLogs(monitor.id)
       setLogs([])
+      setFieldResultsCache({})
+      setExpandedFieldLog(null)
       setConfirmClear(false)
       toast.success('Logs cleared')
     } catch { toast.error('Failed to clear logs') }
+  }
+
+  const toggleFieldResults = async (logId) => {
+    if (expandedFieldLog === logId) { setExpandedFieldLog(null); return }
+    setExpandedFieldLog(logId)
+    if (!fieldResultsCache[logId]) {
+      try {
+        const { data } = await monitorsApi.logFields(monitor.id, logId)
+        setFieldResultsCache(c => ({ ...c, [logId]: data }))
+      } catch { setFieldResultsCache(c => ({ ...c, [logId]: [] })) }
+    }
   }
 
   const filtered = logs.filter(l => {
@@ -1063,76 +1575,131 @@ function LogDrawer({ monitor, onLogsChange }) {
           {filtered.map(l => (
             <div key={l.id}
               className="flex items-start gap-3 px-4 py-2.5 text-sm group transition-colors"
-              style={{ background: 'var(--card)' }}
+              style={{ background: 'var(--card)', flexDirection: 'column' }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--muted)'}
               onMouseLeave={e => e.currentTarget.style.background = 'var(--card)'}>
 
-              {/* Icon */}
-              <div className="mt-0.5 shrink-0">
-                {l.error
-                  ? <AlertCircle size={13} style={{ color: 'var(--destructive)' }} />
-                  : l.alerted
-                    ? <Zap size={13} className="text-amber-500" />
-                    : l.condition_met
-                      ? <CheckCircle2 size={13} className="text-emerald-500" />
-                      : <Clock size={13} style={{ color: 'var(--muted-foreground)' }} />}
-              </div>
+              {/* Main log row */}
+              <div className="flex items-start gap-3 w-full">
+                {/* Icon */}
+                <div className="mt-0.5 shrink-0">
+                  {l.error
+                    ? <AlertCircle size={13} style={{ color: 'var(--destructive)' }} />
+                    : l.alerted
+                      ? <Zap size={13} className="text-amber-500" />
+                      : l.condition_met
+                        ? <CheckCircle2 size={13} className="text-emerald-500" />
+                        : <Clock size={13} style={{ color: 'var(--muted-foreground)' }} />}
+                </div>
 
-              <div className="flex-1 min-w-0">
-                {/* Value display */}
-                {l.value_found !== null && l.value_found !== undefined ? (
-                  <p className="font-mono text-xs truncate" style={{ color: 'var(--foreground)' }}>
-                    <span className="font-semibold">
-                      {l.value_found === ''
-                        ? <span style={{ color: 'var(--muted-foreground)', fontStyle: 'italic' }}>empty</span>
-                        : l.value_found}
-                    </span>
-                    {l.prev_value !== null && l.prev_value !== undefined && l.prev_value !== l.value_found && (
-                      <span style={{ color: 'var(--muted-foreground)' }}> ← {l.prev_value}</span>
+                <div className="flex-1 min-w-0">
+                  {/* Value display */}
+                  {l.value_found !== null && l.value_found !== undefined ? (
+                    <p className="font-mono text-xs truncate" style={{ color: 'var(--foreground)' }}>
+                      <span className="font-semibold">
+                        {l.value_found === ''
+                          ? <span style={{ color: 'var(--muted-foreground)', fontStyle: 'italic' }}>empty</span>
+                          : l.value_found}
+                      </span>
+                      {l.prev_value !== null && l.prev_value !== undefined && l.prev_value !== l.value_found && (
+                        <span style={{ color: 'var(--muted-foreground)' }}> ← {l.prev_value}</span>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="font-mono text-xs" style={{ color: 'var(--muted-foreground)', fontStyle: 'italic' }}>
+                      no value extracted
+                    </p>
+                  )}
+
+                  {/* Meta row */}
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    {l.error && <p className="text-xs truncate max-w-xs" style={{ color: 'var(--destructive)' }}>{l.error}</p>}
+                    {l.alerted && <span className="badge-blue text-[10px]">alerted</span>}
+                    {l.duration_ms != null && (
+                      <span className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
+                        {l.duration_ms < 1000 ? `${l.duration_ms}ms` : `${(l.duration_ms / 1000).toFixed(1)}s`}
+                      </span>
+                    )}
+                    {l.fetch_method && (
+                      <span className="text-[10px] px-1 rounded" style={{
+                        background: l.fetch_method === 'playwright' ? 'color-mix(in srgb, #7c3aed 15%, transparent)'
+                          : l.fetch_method === 'static_fallback' ? 'color-mix(in srgb, #d97706 15%, transparent)'
+                          : 'var(--muted)',
+                        color: l.fetch_method === 'playwright' ? '#7c3aed'
+                          : l.fetch_method === 'static_fallback' ? '#d97706'
+                          : 'var(--muted-foreground)',
+                      }}>{l.fetch_method}</span>
+                    )}
+                    {/* Show field-expand button for multi-field monitors */}
+                    {monitor.is_multi_field && !l.error && (
+                      <button type="button"
+                        onClick={() => toggleFieldResults(l.id)}
+                        className="text-[10px] px-1.5 py-0.5 rounded transition-colors"
+                        style={{
+                          background: expandedFieldLog === l.id ? 'color-mix(in srgb, #7c3aed 15%, transparent)' : 'var(--muted)',
+                          color: expandedFieldLog === l.id ? '#7c3aed' : 'var(--muted-foreground)',
+                          border: '1px solid var(--border)',
+                        }}>
+                        {expandedFieldLog === l.id ? '▲ fields' : '▼ fields'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Time + delete */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                    {formatDistanceToNow(
+                      new Date(l.checked_at.endsWith('Z') ? l.checked_at : l.checked_at + 'Z'),
+                      { addSuffix: true }
                     )}
                   </p>
-                ) : (
-                  <p className="font-mono text-xs" style={{ color: 'var(--muted-foreground)', fontStyle: 'italic' }}>
-                    no value extracted
-                  </p>
-                )}
-
-                {/* Meta row */}
-                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                  {l.error && <p className="text-xs truncate max-w-xs" style={{ color: 'var(--destructive)' }}>{l.error}</p>}
-                  {l.alerted && <span className="badge-blue text-[10px]">alerted</span>}
-                  {l.duration_ms != null && (
-                    <span className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
-                      {l.duration_ms < 1000 ? `${l.duration_ms}ms` : `${(l.duration_ms / 1000).toFixed(1)}s`}
-                    </span>
-                  )}
-                  {l.fetch_method && (
-                    <span className="text-[10px] px-1 rounded" style={{
-                      background: l.fetch_method === 'playwright' ? 'color-mix(in srgb, #7c3aed 15%, transparent)'
-                        : l.fetch_method === 'static_fallback' ? 'color-mix(in srgb, #d97706 15%, transparent)'
-                        : 'var(--muted)',
-                      color: l.fetch_method === 'playwright' ? '#7c3aed'
-                        : l.fetch_method === 'static_fallback' ? '#d97706'
-                        : 'var(--muted-foreground)',
-                    }}>{l.fetch_method}</span>
-                  )}
+                  <button onClick={() => handleDeleteLog(l.id)} type="button"
+                    className="opacity-0 group-hover:opacity-100 btn-ghost p-1 transition-opacity"
+                    style={{ color: 'var(--destructive)' }}>
+                    <Trash2 size={11} />
+                  </button>
                 </div>
               </div>
 
-              {/* Time + delete */}
-              <div className="flex items-center gap-2 shrink-0">
-                <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                  {formatDistanceToNow(
-                    new Date(l.checked_at.endsWith('Z') ? l.checked_at : l.checked_at + 'Z'),
-                    { addSuffix: true }
+              {/* Expandable field results for multi-field monitors */}
+              {monitor.is_multi_field && expandedFieldLog === l.id && (
+                <div className="w-full mt-2 ml-5 rounded-lg overflow-hidden"
+                  style={{ border: '1px solid var(--border)' }}>
+                  {!fieldResultsCache[l.id] ? (
+                    <p className="text-xs px-3 py-2" style={{ color: 'var(--muted-foreground)' }}>Loading…</p>
+                  ) : fieldResultsCache[l.id].length === 0 ? (
+                    <p className="text-xs px-3 py-2" style={{ color: 'var(--muted-foreground)' }}>No field results stored for this run</p>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+                          <th className="text-left px-3 py-1.5 font-semibold" style={{ color: 'var(--muted-foreground)' }}>Field</th>
+                          <th className="text-left px-3 py-1.5 font-semibold" style={{ color: 'var(--muted-foreground)' }}>Value</th>
+                          <th className="text-left px-3 py-1.5 font-semibold" style={{ color: 'var(--muted-foreground)' }}>Normalized</th>
+                          <th className="text-right px-3 py-1.5 font-semibold" style={{ color: 'var(--muted-foreground)' }}>Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fieldResultsCache[l.id].map((fr, i) => (
+                          <tr key={i} style={{ borderBottom: i < fieldResultsCache[l.id].length - 1 ? '1px solid var(--border)' : 'none' }}>
+                            <td className="px-3 py-1.5 font-mono font-semibold" style={{ color: 'var(--foreground)' }}>{fr.field_name}</td>
+                            <td className="px-3 py-1.5 font-mono" style={{ color: fr.success ? 'var(--foreground)' : 'var(--destructive)' }}>
+                              {fr.success ? (fr.raw_value || '—') : <span style={{ fontStyle: 'italic' }}>{fr.error_message || 'no value'}</span>}
+                            </td>
+                            <td className="px-3 py-1.5 font-mono" style={{ color: 'var(--muted-foreground)' }}>
+                              {fr.normalized_value != null ? fr.normalized_value : '—'}
+                            </td>
+                            <td className="px-3 py-1.5 text-right" style={{ color: 'var(--muted-foreground)' }}>
+                              {fr.extraction_time_ms != null ? `${fr.extraction_time_ms}ms` : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
-                </p>
-                <button onClick={() => handleDeleteLog(l.id)} type="button"
-                  className="opacity-0 group-hover:opacity-100 btn-ghost p-1 transition-opacity"
-                  style={{ color: 'var(--destructive)' }}>
-                  <Trash2 size={11} />
-                </button>
-              </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -1190,6 +1757,7 @@ function MonitorCard({ m, onEdit, onDelete, onToggle, onCheck, onClone, checking
                 {m.name}
               </p>
               <span className={`${sc.badge} text-[10px] shrink-0`}>{m.status}</span>
+              {m.is_multi_field && <span className="badge-purple text-[10px] shrink-0">multi-field</span>}
               {m.use_playwright && <span className="badge-purple text-[10px] shrink-0">playwright</span>}
               {(m.notify_channels || []).map(ch => (
                 <span key={ch} className="badge-gray text-[10px] shrink-0">{ch}</span>
@@ -1203,16 +1771,31 @@ function MonitorCard({ m, onEdit, onDelete, onToggle, onCheck, onClone, checking
 
             {/* Selector + condition */}
             <p className="text-xs mt-1 truncate" style={{ color: 'var(--muted-foreground)' }}>
-              <span className="font-mono px-1 rounded mr-1 text-[10px]"
-                style={{ background: 'var(--muted)' }}>{m.selector_type}</span>
-              <span className="font-mono" style={{ opacity: 0.75 }}>
-                {m.selector.length > 45 ? m.selector.slice(0, 45) + '…' : m.selector}
-              </span>
-              {m.condition_operator && (
-                <span className="ml-1 opacity-60">
-                  · {OPERATORS.find(o => o.value === m.condition_operator)?.label}
-                  {m.condition_value && ` "${m.condition_value}"`}
-                </span>
+              {m.is_multi_field ? (
+                <>
+                  <span className="font-mono px-1 rounded mr-1 text-[10px]"
+                    style={{ background: 'color-mix(in srgb, #7c3aed 15%, transparent)', color: '#7c3aed' }}>
+                    {(m.fields || []).length} fields
+                  </span>
+                  {(m.fields || []).map(f => f.name).join(', ')}
+                  {m.multi_field_condition && (
+                    <span className="ml-1 opacity-60 font-mono">· {m.multi_field_condition}</span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="font-mono px-1 rounded mr-1 text-[10px]"
+                    style={{ background: 'var(--muted)' }}>{m.selector_type}</span>
+                  <span className="font-mono" style={{ opacity: 0.75 }}>
+                    {m.selector.length > 45 ? m.selector.slice(0, 45) + '…' : m.selector}
+                  </span>
+                  {m.condition_operator && (
+                    <span className="ml-1 opacity-60">
+                      · {OPERATORS.find(o => o.value === m.condition_operator)?.label}
+                      {m.condition_value && ` "${m.condition_value}"`}
+                    </span>
+                  )}
+                </>
               )}
             </p>
 

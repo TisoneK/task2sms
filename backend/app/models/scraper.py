@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, JSON, Enum, func
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, JSON, Enum, Float, func
+from sqlalchemy.orm import relationship
 import enum
 from app.core.database import Base
 
@@ -89,8 +90,38 @@ class ScraperMonitor(Base):
     user_agent = Column(String(300), nullable=True)
     extra_headers = Column(JSON, nullable=True)
 
+    # Multi-element fields support
+    is_multi_field = Column(Boolean, default=False, nullable=False, server_default='0')
+    multi_field_condition = Column(Text, nullable=True)  # JS expression e.g. "home_score + away_score > 150"
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    fields = relationship("MonitorField", back_populates="monitor", cascade="all, delete-orphan",
+                          order_by="MonitorField.position")
+
+
+class MonitorField(Base):
+    """A named extraction field for multi-element monitors."""
+    __tablename__ = "monitor_fields"
+
+    id = Column(Integer, primary_key=True, index=True)
+    monitor_id = Column(Integer, ForeignKey("scraper_monitors.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    name = Column(String(100), nullable=False)               # e.g. home_score, away_score
+    selector = Column(Text, nullable=False)
+    selector_type = Column(String(20), default="css")        # css | xpath | text | regex | js_expr
+    attribute = Column(String(100), nullable=True)           # HTML attribute to extract
+    normalization = Column(String(50), nullable=True)        # extract_numbers | strip | none
+    wait_selector = Column(Text, nullable=True)              # per-field wait selector (Playwright)
+    position = Column(Integer, default=0)                    # ordering
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    monitor = relationship("ScraperMonitor", back_populates="fields")
+    results = relationship("FieldResult", back_populates="field", cascade="all, delete-orphan")
 
 
 class ScraperCheckLog(Base):
@@ -107,3 +138,24 @@ class ScraperCheckLog(Base):
     retry_num = Column(Integer, default=0)
     fetch_method = Column(String(20), nullable=True)  # static | playwright | static_fallback | unknown
     checked_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    field_results = relationship("FieldResult", back_populates="check_log", cascade="all, delete-orphan")
+
+
+class FieldResult(Base):
+    """Per-field extraction result linked to a scraper check log."""
+    __tablename__ = "field_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    check_log_id = Column(Integer, ForeignKey("scraper_check_logs.id", ondelete="CASCADE"), nullable=False, index=True)
+    field_id = Column(Integer, ForeignKey("monitor_fields.id", ondelete="CASCADE"), nullable=False, index=True)
+    field_name = Column(String(100), nullable=False)         # denormalised for easy querying
+    raw_value = Column(Text, nullable=True)
+    normalized_value = Column(Float, nullable=True)
+    extraction_time_ms = Column(Integer, nullable=True)
+    success = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    check_log = relationship("ScraperCheckLog", back_populates="field_results")
+    field = relationship("MonitorField", back_populates="results")

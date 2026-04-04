@@ -1,16 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Background -->
-  <circle cx="16" cy="16" r="16" fill="#0284c7"/>
-
-  <!-- Optimized MessageSquare -->
-  <g transform="translate(4, 4.5)">
-    <path 
-      d="M21 15a2 2 0 0 1-2 2H8l-3 3V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"
-      fill="none"
-      stroke="white"
-      stroke-width="2.6"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    />
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background rounded square matching the sidebar logo container -->
+  <rect width="32" height="32" rx="8" fill="#0284c7"/>
+  <!-- MessageSquare icon: rounded rect with bottom-left tail, matching lucide exactly -->
+  <rect x="6" y="7" width="20" height="13" rx="2.5" fill="white"/>
+  <!-- Tail bottom-left, same as lucide MessageSquare -->
+  <path d="M6 20L6 24L10.5 20" fill="white"/>
+  <!-- Three dots for chat effect -->
+  <circle cx="11" cy="13.5" r="1.2" fill="#0284c7"/>
+  <circle cx="16" cy="13.5" r="1.2" fill="#0284c7"/>
+  <circle cx="21" cy="13.5" r="1.2" fill="#0284c7"/>
 </svg>

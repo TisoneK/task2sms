@@ -12,12 +12,12 @@ Improvements v2:
 import httpx
 import re
 import time
-from typing import Optional
+from typing import Optional, List
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from app.models.scraper import ScraperMonitor, ScraperCheckLog, SelectorType, MonitorStatus
+from app.models.scraper import ScraperMonitor, ScraperCheckLog, SelectorType, MonitorStatus, MonitorField, FieldResult
 import logging
 
 logger = logging.getLogger(__name__)
@@ -406,6 +406,140 @@ def _check_condition(value: Optional[str], operator: Optional[str],
 
 # ── Check & notify ────────────────────────────────────────────────────────────
 
+
+# ── Multi-field extraction ────────────────────────────────────────────────────
+
+def _apply_normalization(value, normalization):
+    if value is None or not normalization:
+        return None
+    if normalization == 'extract_numbers':
+        return _clean_numeric_string(value)
+    return None
+
+
+class _MathShim:
+    abs = staticmethod(abs)
+    max = staticmethod(max)
+    min = staticmethod(min)
+    round = staticmethod(round)
+
+
+def _evaluate_multi_field_condition(field_values, norm_values, condition):
+    """
+    Evaluate a JS-like boolean expression over named field values.
+    Returns (condition_met: bool, summary_value: str).
+    """
+    parts = [f"{k}={norm_values.get(k) if norm_values.get(k) is not None else field_values.get(k)}"
+             for k in field_values]
+    summary = " | ".join(parts)
+
+    if not condition:
+        return True, summary
+
+    namespace = {"_math_abs": abs, "_math_max": max, "_math_min": min, "_math_round": round}
+    for name, norm in norm_values.items():
+        namespace[name] = norm if norm is not None else field_values.get(name)
+
+    py_cond = (
+        condition
+        .replace("&&", " and ")
+        .replace("||", " or ")
+        .replace("Math.abs", "_math_abs")
+        .replace("Math.max", "_math_max")
+        .replace("Math.min", "_math_min")
+        .replace("Math.round", "_math_round")
+    )
+
+    try:
+        result = bool(eval(py_cond, {"__builtins__": {}}, namespace))  # noqa: S307
+    except Exception as e:
+        logger.warning(f"Multi-field condition eval failed: {e!s} — expr: {condition}")
+        result = False
+
+    return result, summary
+
+
+async def _do_multi_field_check(monitor, db):
+    """
+    Execute a multi-field monitor: single page fetch, extract all named fields,
+    evaluate the condition expression.
+
+    Returns:
+        (summary_value, condition_met, error, duration_ms, retry_num, fetch_method, field_results_data)
+    """
+    from app.services.integrations.web_scraping import PageFetcher, ElementExtractor
+
+    rows = await db.execute(
+        select(MonitorField)
+        .where(MonitorField.monitor_id == monitor.id)
+        .order_by(MonitorField.position)
+    )
+    fields = list(rows.scalars().all())
+
+    if not fields:
+        return None, False, "No fields configured for multi-field monitor", 0, 0, "unknown", []
+
+    start = time.monotonic()
+    retry_attempts = getattr(monitor, "retry_attempts", 3) or 1
+    last_err = None
+
+    for attempt in range(max(1, retry_attempts)):
+        try:
+            fetch_result = await PageFetcher.fetch(
+                url=monitor.url,
+                use_playwright=getattr(monitor, "use_playwright", False),
+                wait_selector=getattr(monitor, "wait_selector", None),
+                wait_ms=getattr(monitor, "wait_ms", 3000),
+                user_agent=getattr(monitor, "user_agent", None),
+                extra_headers=getattr(monitor, "extra_headers", None),
+                timeout=getattr(monitor, "timeout_seconds", 30) or 30,
+            )
+
+            if fetch_result.error:
+                raise RuntimeError(f"Page fetch failed: {fetch_result.error}")
+
+            html = fetch_result.html
+            field_values = {}
+            norm_values = {}
+            field_results_data = []
+
+            for field in fields:
+                t0 = time.monotonic()
+                extract = ElementExtractor.extract(
+                    html=html,
+                    selector_type=field.selector_type,
+                    selector=field.selector,
+                    attribute=field.attribute,
+                )
+                elapsed = int((time.monotonic() - t0) * 1000)
+                norm = _apply_normalization(extract.value, field.normalization)
+                field_values[field.name] = extract.value
+                norm_values[field.name] = norm
+                field_results_data.append({
+                    "field_id": field.id,
+                    "field_name": field.name,
+                    "raw_value": extract.value,
+                    "normalized_value": norm,
+                    "extraction_time_ms": elapsed,
+                    "success": extract.value is not None,
+                    "error_message": extract.error,
+                })
+
+            duration_ms = int((time.monotonic() - start) * 1000)
+            condition_met, summary = _evaluate_multi_field_condition(
+                field_values, norm_values,
+                getattr(monitor, "multi_field_condition", None),
+            )
+            return summary, condition_met, None, duration_ms, attempt, fetch_result.method, field_results_data
+
+        except Exception as e:
+            last_err = str(e)
+            logger.warning(f"Monitor {monitor.id} multi-field attempt {attempt + 1} failed: {e}")
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    return None, False, last_err, duration_ms, retry_attempts - 1, "unknown", []
+
+
 async def _do_check(monitor: ScraperMonitor) -> tuple:
     """Returns (value, monitor_value, error, duration_ms, retry_num, fetch_method)"""
     from app.services.integrations.web_scraping import ElementExtractor
@@ -454,69 +588,122 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
     log = ScraperCheckLog(monitor_id=monitor.id)
     db.add(log)
 
-    value, monitor_value, error, duration_ms, retry_num, fetch_method = await _do_check(monitor)
+    is_multi = getattr(monitor, "is_multi_field", False)
 
-    log.duration_ms = duration_ms
-    log.retry_num = retry_num
-    log.fetch_method = fetch_method
+    if is_multi:
+        # ── Multi-field path ──────────────────────────────────────────────
+        value, condition_met, error, duration_ms, retry_num, fetch_method, field_results_data = (
+            await _do_multi_field_check(monitor, db)
+        )
+        log.duration_ms = duration_ms
+        log.retry_num = retry_num
+        log.fetch_method = fetch_method
+        prev_value = monitor.last_value
 
-    prev_value = monitor.last_value
-
-    if error:
-        log.error = error
-        log.condition_met = False
-        log.value_found = None
-        log.prev_value = prev_value
-        monitor.error_message = error
-        monitor.status = MonitorStatus.ERROR
-        monitor.last_checked_at = datetime.now(timezone.utc)
-        monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
-        monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
-        monitor.consecutive_failures = (getattr(monitor, "consecutive_failures", 0) or 0) + 1
-
-        max_fail = getattr(monitor, "max_failures_before_pause", 10) or 10
-        if monitor.consecutive_failures >= max_fail:
-            monitor.status = MonitorStatus.PAUSED
-            logger.warning(f"Monitor {monitor.id} auto-paused after {monitor.consecutive_failures} failures")
-    else:
-        log.value_found = value
-        log.prev_value = prev_value
-
-        # Selector matched nothing → treat as a FAILED run, not a "success"
-        # This is the key fix for "4 runs, 100% ok but no data"
-        if value is None:
+        if error:
+            log.error = error
             log.condition_met = False
-            log.error = "Selector matched no element — page structure may have changed or selector is wrong"
+            log.value_found = None
+            log.prev_value = prev_value
+            monitor.error_message = error
+            monitor.status = MonitorStatus.ERROR
             monitor.last_checked_at = datetime.now(timezone.utc)
             monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
             monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
             monitor.consecutive_failures = (getattr(monitor, "consecutive_failures", 0) or 0) + 1
-            monitor.error_message = "Selector matched no element"
-            # Switch to ERROR after 3+ consecutive selector-not-found
-            if monitor.consecutive_failures >= 3:
-                monitor.status = MonitorStatus.ERROR
+            max_fail = getattr(monitor, "max_failures_before_pause", 10) or 10
+            if monitor.consecutive_failures >= max_fail:
+                monitor.status = MonitorStatus.PAUSED
         else:
-            check_value = monitor_value if monitor_value is not None else value
-
-            if monitor.condition_operator == "changed":
-                condition_met = False if prev_value is None else (check_value != prev_value)
-            else:
-                condition_met = _check_condition(check_value, monitor.condition_operator, monitor.condition_value)
-
+            log.value_found = value
+            log.prev_value = prev_value
             log.condition_met = condition_met
             monitor.last_checked_at = datetime.now(timezone.utc)
-            monitor.last_value = check_value
+            monitor.last_value = value
             monitor.error_message = None
             monitor.status = MonitorStatus.ACTIVE
             monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
-            
-            # Only count as success if condition was actually met
             if condition_met:
                 monitor.success_count = (getattr(monitor, "success_count", 0) or 0) + 1
             else:
                 monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
-                
             monitor.consecutive_failures = 0
+
+            # Flush log to get its id, then persist field results
+            await db.flush()
+            for fr in field_results_data:
+                db.add(FieldResult(
+                    check_log_id=log.id,
+                    field_id=fr["field_id"],
+                    field_name=fr["field_name"],
+                    raw_value=fr["raw_value"],
+                    normalized_value=fr["normalized_value"],
+                    extraction_time_ms=fr["extraction_time_ms"],
+                    success=fr["success"],
+                    error_message=fr["error_message"],
+                ))
+
+    else:
+        # ── Single-field path (original logic, unchanged) ─────────────────
+        value, monitor_value, error, duration_ms, retry_num, fetch_method = await _do_check(monitor)
+
+        log.duration_ms = duration_ms
+        log.retry_num = retry_num
+        log.fetch_method = fetch_method
+
+        prev_value = monitor.last_value
+
+        if error:
+            log.error = error
+            log.condition_met = False
+            log.value_found = None
+            log.prev_value = prev_value
+            monitor.error_message = error
+            monitor.status = MonitorStatus.ERROR
+            monitor.last_checked_at = datetime.now(timezone.utc)
+            monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
+            monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
+            monitor.consecutive_failures = (getattr(monitor, "consecutive_failures", 0) or 0) + 1
+
+            max_fail = getattr(monitor, "max_failures_before_pause", 10) or 10
+            if monitor.consecutive_failures >= max_fail:
+                monitor.status = MonitorStatus.PAUSED
+                logger.warning(f"Monitor {monitor.id} auto-paused after {monitor.consecutive_failures} failures")
+        else:
+            log.value_found = value
+            log.prev_value = prev_value
+
+            if value is None:
+                log.condition_met = False
+                log.error = "Selector matched no element — page structure may have changed or selector is wrong"
+                monitor.last_checked_at = datetime.now(timezone.utc)
+                monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
+                monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
+                monitor.consecutive_failures = (getattr(monitor, "consecutive_failures", 0) or 0) + 1
+                monitor.error_message = "Selector matched no element"
+                if monitor.consecutive_failures >= 3:
+                    monitor.status = MonitorStatus.ERROR
+            else:
+                check_value = monitor_value if monitor_value is not None else value
+
+                if monitor.condition_operator == "changed":
+                    condition_met = False if prev_value is None else (check_value != prev_value)
+                else:
+                    condition_met = _check_condition(check_value, monitor.condition_operator, monitor.condition_value)
+
+                log.condition_met = condition_met
+                monitor.last_checked_at = datetime.now(timezone.utc)
+                monitor.last_value = check_value
+                monitor.error_message = None
+                monitor.status = MonitorStatus.ACTIVE
+                monitor.run_count = (getattr(monitor, "run_count", 0) or 0) + 1
+
+                if condition_met:
+                    monitor.success_count = (getattr(monitor, "success_count", 0) or 0) + 1
+                else:
+                    monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
+
+                monitor.consecutive_failures = 0
 
     await db.commit()
     return log
@@ -623,8 +810,10 @@ async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
 # ── Query helpers ─────────────────────────────────────────────────────────────
 
 async def get_monitors(db: AsyncSession, user_id: int):
+    from sqlalchemy.orm import selectinload
     result = await db.execute(
         select(ScraperMonitor)
+        .options(selectinload(ScraperMonitor.fields))
         .where(ScraperMonitor.user_id == user_id)
         .order_by(ScraperMonitor.created_at.desc())
     )
@@ -632,8 +821,11 @@ async def get_monitors(db: AsyncSession, user_id: int):
 
 
 async def get_monitor(db: AsyncSession, monitor_id: int, user_id: int):
+    from sqlalchemy.orm import selectinload
     result = await db.execute(
-        select(ScraperMonitor).where(
+        select(ScraperMonitor)
+        .options(selectinload(ScraperMonitor.fields))
+        .where(
             ScraperMonitor.id == monitor_id,
             ScraperMonitor.user_id == user_id,
         )

@@ -120,9 +120,9 @@ export default function ElementPicker({ url, onSelect, onClose }) {
       }
       else if (msg.type === 'error') {
         setStatus(msg.message)
+        setPhaseSync('error')  // Set phase to error to show red styling
         if (phaseRef.current === 'loading') {
           clearTimeout(connectTimeout)
-          setPhaseSync('error')
         }
       }
     }

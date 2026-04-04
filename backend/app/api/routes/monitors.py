@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.scraper import SelectorType, MonitorStatus, ScraperMonitor
+from app.models.scraper import SelectorType, MonitorStatus, ScraperMonitor, MonitorField
 # js_expr is a virtual selector type handled entirely in scraper_service
 _ALL_SELECTOR_TYPES = list(SelectorType) + ["js_expr"]
 from app.services.integrations.scraper_service import (
@@ -13,6 +13,18 @@ from app.services.integrations.scraper_service import (
 )
 
 router = APIRouter(prefix="/monitors", tags=["web-monitor"])
+
+
+# ── Multi-field Pydantic schemas ──────────────────────────────────────────────
+
+class MonitorFieldCreate(BaseModel):
+    name: str
+    selector: str
+    selector_type: str = "css"   # css | xpath | text | regex | js_expr
+    attribute: Optional[str] = None
+    normalization: Optional[str] = None   # extract_numbers | strip | none
+    wait_selector: Optional[str] = None
+    position: int = 0
 
 
 class MonitorCreate(BaseModel):
@@ -56,6 +68,10 @@ class MonitorCreate(BaseModel):
     tags: Optional[List[str]] = None
     user_agent: Optional[str] = None
     extra_headers: Optional[dict] = None
+    # Multi-element fields
+    is_multi_field: bool = False
+    multi_field_condition: Optional[str] = None   # JS-like expression e.g. "home_score + away_score > 150"
+    fields: Optional[List[MonitorFieldCreate]] = []
 
 
 class MonitorUpdate(BaseModel):
@@ -90,6 +106,23 @@ class MonitorUpdate(BaseModel):
     timeout_seconds: Optional[int] = None
     max_failures_before_pause: Optional[int] = None
     tags: Optional[List[str]] = None
+    # Multi-element fields
+    is_multi_field: Optional[bool] = None
+    multi_field_condition: Optional[str] = None
+    fields: Optional[List[MonitorFieldCreate]] = None   # full replacement of fields list
+
+
+def _field_out(f: MonitorField) -> dict:
+    return {
+        "id": f.id,
+        "name": f.name,
+        "selector": f.selector,
+        "selector_type": f.selector_type,
+        "attribute": f.attribute,
+        "normalization": f.normalization,
+        "wait_selector": f.wait_selector,
+        "position": f.position,
+    }
 
 
 def _out(m: ScraperMonitor) -> dict:
@@ -136,6 +169,10 @@ def _out(m: ScraperMonitor) -> dict:
         "tags": getattr(m, "tags", None) or [],
         "created_at": m.created_at,
         "last_condition_met": None,  # Will be populated below
+        # Multi-element fields
+        "is_multi_field": getattr(m, "is_multi_field", False),
+        "multi_field_condition": getattr(m, "multi_field_condition", None),
+        "fields": [_field_out(f) for f in (m.fields if hasattr(m, "fields") and m.fields else [])],
     }
 
 
@@ -161,26 +198,54 @@ async def list_monitors(db: AsyncSession = Depends(get_db),
 async def create_monitor(body: MonitorCreate,
                          db: AsyncSession = Depends(get_db),
                          current_user=Depends(get_current_user)):
-    # Validate selector before creating monitor
-    from app.services.integrations.web_scraping import SelectorValidator
-    
-    is_valid, error_message = await SelectorValidator.validate(
-        url=body.url,
-        selector_type=body.selector_type,
-        selector=body.selector,
-        attribute=body.attribute,
-        use_playwright=body.use_playwright,
-        wait_ms=body.wait_ms
-    )
-    
-    if not is_valid:
-        return {
-            "error": "Selector validation failed",
-            "detail": error_message
-        }, 400
-    
-    m = ScraperMonitor(user_id=current_user.id, **body.model_dump())
+    # For single-field monitors: validate selector before creating
+    if not body.is_multi_field and body.selector:
+        from app.services.integrations.web_scraping import SelectorValidator
+        is_valid, error_message = await SelectorValidator.validate(
+            url=body.url,
+            selector_type=body.selector_type,
+            selector=body.selector,
+            attribute=body.attribute,
+            use_playwright=body.use_playwright,
+            wait_ms=body.wait_ms
+        )
+        if not is_valid:
+            return {
+                "error": "Selector validation failed",
+                "detail": error_message
+            }, 400
+
+    # Validate multi-field names if present
+    if body.is_multi_field and body.fields:
+        from app.services.field_validation import validate_field_name
+        seen: list[str] = []
+        for field in body.fields:
+            result = validate_field_name(field.name, seen)
+            if not result.valid:
+                raise HTTPException(400, f"Invalid field name '{field.name}': {result.error}")
+            seen.append(field.name)
+
+    # Strip fields from the dict before creating the monitor model
+    monitor_data = body.model_dump(exclude={"fields"})
+    m = ScraperMonitor(user_id=current_user.id, **monitor_data)
     db.add(m)
+    await db.flush()  # get m.id before adding fields
+
+    # Persist MonitorField rows
+    if body.is_multi_field and body.fields:
+        for i, fdata in enumerate(body.fields):
+            mf = MonitorField(
+                monitor_id=m.id,
+                name=fdata.name,
+                selector=fdata.selector,
+                selector_type=fdata.selector_type,
+                attribute=fdata.attribute,
+                normalization=fdata.normalization,
+                wait_selector=fdata.wait_selector,
+                position=fdata.position if fdata.position else i,
+            )
+            db.add(mf)
+
     await db.commit()
     await db.refresh(m)
     from app.workers.scheduler import schedule_monitor
@@ -209,35 +274,54 @@ async def update_monitor(mid: int, body: MonitorUpdate,
     m = await get_monitor(db, mid, current_user.id)
     if not m:
         raise HTTPException(404, "Monitor not found")
-    
-    # Validate selector if it's being updated
-    update_data = body.model_dump(exclude_unset=True)
-    if 'selector' in update_data or 'selector_type' in update_data or 'url' in update_data:
+
+    update_data = body.model_dump(exclude_unset=True, exclude={"fields"})
+
+    # Validate selector if it's being updated (single-field mode)
+    is_multi = update_data.get('is_multi_field', getattr(m, 'is_multi_field', False))
+    if not is_multi and ('selector' in update_data or 'selector_type' in update_data or 'url' in update_data):
         from app.services.integrations.web_scraping import SelectorValidator
-        
-        # Test with updated values
-        test_url = update_data.get('url', m.url)
-        test_selector = update_data.get('selector', m.selector)
+        test_url           = update_data.get('url', m.url)
+        test_selector      = update_data.get('selector', m.selector)
         test_selector_type = update_data.get('selector_type', m.selector_type)
-        test_attribute = update_data.get('attribute', m.attribute)
+        test_attribute     = update_data.get('attribute', m.attribute)
         test_use_playwright = update_data.get('use_playwright', m.use_playwright)
-        test_wait_ms = update_data.get('wait_ms', m.wait_ms)
-        
+        test_wait_ms       = update_data.get('wait_ms', m.wait_ms)
         is_valid, error_message = await SelectorValidator.validate(
-            url=test_url,
-            selector_type=test_selector_type,
-            selector=test_selector,
-            attribute=test_attribute,
-            use_playwright=test_use_playwright,
-            wait_ms=test_wait_ms
+            url=test_url, selector_type=test_selector_type, selector=test_selector,
+            attribute=test_attribute, use_playwright=test_use_playwright, wait_ms=test_wait_ms
         )
-        
         if not is_valid:
-            return {
-                "error": "Selector validation failed",
-                "detail": error_message
-            }, 400
-    
+            return {"error": "Selector validation failed", "detail": error_message}, 400
+
+    # Validate & replace fields if provided
+    if body.fields is not None:
+        from app.services.field_validation import validate_field_name
+        from sqlalchemy import delete as sql_delete
+        from app.models.scraper import MonitorField as MF
+
+        seen: list[str] = []
+        for fdata in body.fields:
+            result = validate_field_name(fdata.name, seen)
+            if not result.valid:
+                raise HTTPException(400, f"Invalid field name '{fdata.name}': {result.error}")
+            seen.append(fdata.name)
+
+        # Delete existing fields then re-insert
+        await db.execute(sql_delete(MF).where(MF.monitor_id == mid))
+        for i, fdata in enumerate(body.fields):
+            mf = MonitorField(
+                monitor_id=mid,
+                name=fdata.name,
+                selector=fdata.selector,
+                selector_type=fdata.selector_type,
+                attribute=fdata.attribute,
+                normalization=fdata.normalization,
+                wait_selector=fdata.wait_selector,
+                position=fdata.position if fdata.position else i,
+            )
+            db.add(mf)
+
     for k, v in update_data.items():
         setattr(m, k, v)
     await db.commit()
@@ -409,3 +493,150 @@ async def test_selector(body: SelectorTestRequest,
         "used_playwright": result.used_playwright,
         "html_preview": result.html_preview
     }
+
+
+# ── Multi-field test (no saved monitor required) ──────────────────────────────
+
+class MultiFieldTestRequest(BaseModel):
+    url: str
+    use_playwright: bool = False
+    wait_ms: int = 8000
+    fields: List[MonitorFieldCreate]
+
+
+@router.post("/test-multi-fields")
+async def test_multi_fields(body: MultiFieldTestRequest,
+                            current_user=Depends(get_current_user)):
+    """Test multiple field extractions against a URL in a single page load."""
+    from app.services.integrations.web_scraping import PageFetcher, ElementExtractor
+    import time
+
+    fetch_result = await PageFetcher.fetch(
+        url=body.url,
+        use_playwright=body.use_playwright,
+        wait_ms=body.wait_ms,
+    )
+
+    if fetch_result.error:
+        return {
+            "success": False,
+            "error": fetch_result.error,
+            "fields": [],
+            "duration_ms": fetch_result.duration_ms,
+            "used_playwright": fetch_result.method == "playwright",
+        }
+
+    field_results = []
+    for field in body.fields:
+        t0 = time.monotonic()
+        extract = ElementExtractor.extract(
+            html=fetch_result.html,
+            selector_type=field.selector_type,
+            selector=field.selector,
+            attribute=field.attribute,
+        )
+        elapsed = int((time.monotonic() - t0) * 1000)
+
+        norm_value = None
+        if extract.value is not None and field.normalization == "extract_numbers":
+            from app.services.integrations.scraper_service import _clean_numeric_string
+            norm_value = _clean_numeric_string(extract.value)
+
+        field_results.append({
+            "name": field.name,
+            "value": extract.value,
+            "normalized_value": norm_value,
+            "success": extract.value is not None,
+            "error": extract.error,
+            "diagnosis": extract.diagnosis,
+            "extraction_time_ms": elapsed,
+        })
+
+    return {
+        "success": True,
+        "fields": field_results,
+        "duration_ms": fetch_result.duration_ms,
+        "used_playwright": fetch_result.method == "playwright",
+    }
+
+
+# ── Field name validation ─────────────────────────────────────────────────────
+
+class FieldNameValidationRequest(BaseModel):
+    field_name: str
+    monitor_id: Optional[int] = None
+    existing_names: Optional[List[str]] = []
+
+
+@router.post("/validate-field-name")
+async def validate_field_name_endpoint(
+    body: FieldNameValidationRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Validate a proposed field name in real-time."""
+    from app.services.field_validation import validate_field_name, get_domain_suggestions
+    from sqlalchemy import select as sql_select
+
+    existing = list(body.existing_names or [])
+
+    if body.monitor_id:
+        rows = await db.execute(
+            sql_select(MonitorField.name).where(MonitorField.monitor_id == body.monitor_id)
+        )
+        existing += [r for r in rows.scalars().all() if r not in existing]
+
+    result = validate_field_name(body.field_name, existing)
+    return {
+        "valid": result.valid,
+        "error": result.error,
+        "suggestion": result.suggestion,
+        "autocomplete": result.autocomplete,
+    }
+
+
+# ── Field-name suggestions for a URL ─────────────────────────────────────────
+
+@router.get("/field-suggestions")
+async def field_suggestions(url: str, current_user=Depends(get_current_user)):
+    """Return domain-aware field name suggestions for a given URL."""
+    from app.services.field_validation import get_domain_suggestions, FIELD_SUGGESTIONS
+    suggestions = get_domain_suggestions(url)
+    if not suggestions:
+        all_s = []
+        for v in FIELD_SUGGESTIONS.values():
+            all_s.extend(v)
+        suggestions = all_s[:16]
+    return {"suggestions": suggestions}
+
+
+# ── Per-log field results ─────────────────────────────────────────────────────
+
+@router.get("/{mid}/logs/{log_id}/fields")
+async def log_field_results(mid: int, log_id: int,
+                             db: AsyncSession = Depends(get_db),
+                             current_user=Depends(get_current_user)):
+    """Return field-level extraction results for a specific check log entry."""
+    m = await get_monitor(db, mid, current_user.id)
+    if not m:
+        raise HTTPException(404, "Monitor not found")
+
+    from sqlalchemy import select as sql_select
+    from app.models.scraper import FieldResult
+    rows = await db.execute(
+        sql_select(FieldResult)
+        .where(FieldResult.check_log_id == log_id)
+        .order_by(FieldResult.field_name)
+    )
+    results = rows.scalars().all()
+    return [
+        {
+            "field_name": r.field_name,
+            "raw_value": r.raw_value,
+            "normalized_value": r.normalized_value,
+            "success": r.success,
+            "error_message": r.error_message,
+            "extraction_time_ms": r.extraction_time_ms,
+        }
+        for r in results
+    ]

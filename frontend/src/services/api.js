@@ -94,7 +94,10 @@ export const telegramApi = {
 }
 
 export const monitorsApi = {
-  testSelector: (d) => api.post('/monitors/test-selector', d),
+  testSelector:      (d) => api.post('/monitors/test-selector', d),
+  testMultiFields:   (d) => api.post('/monitors/test-multi-fields', d),
+  validateFieldName: (d) => api.post('/monitors/validate-field-name', d),
+  fieldSuggestions:  (url) => api.get(`/monitors/field-suggestions?url=${encodeURIComponent(url)}`),
   list:       () => api.get('/monitors'),
   create:     (d) => api.post('/monitors', d),
   update:     (id, d) => api.patch(`/monitors/${id}`, d),
@@ -104,6 +107,7 @@ export const monitorsApi = {
   logs:       (id, limit = 100) => api.get(`/monitors/${id}/logs?limit=${limit}`),
   deleteLog:  (mid, lid) => api.delete(`/monitors/${mid}/logs/${lid}`),
   clearLogs:  (mid) => api.delete(`/monitors/${mid}/logs`),
+  logFields:  (mid, lid) => api.get(`/monitors/${mid}/logs/${lid}/fields`),
 }
 
 export const settingsApi = {

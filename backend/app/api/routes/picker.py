@@ -325,6 +325,7 @@ def _run_playwright_subprocess(conn):
 
             elif mtype == "click":
                 x, y = msg.get("x", 0), msg.get("y", 0)
+                logger.info(f"CLICK: Processing click at ({x}, {y})")
                 try:
                     rect = page.evaluate(_CLICK_JS, {"x": x, "y": y})
                     if not rect:
@@ -337,6 +338,8 @@ def _run_playwright_subprocess(conn):
                         conn.send({"type": "error", "message": "No element found at coordinates."})
                         continue
                     
+                    logger.info(f"CLICK: Got element handle, proceeding with child detection")
+                    
                     # Debug: Get element info
                     element_info = page.evaluate("""
                         (el) => {
@@ -345,75 +348,223 @@ def _run_playwright_subprocess(conn):
                                 tagName: el.tagName,
                                 id: el.id,
                                 className: el.className,
-                                textContent: el.textContent ? el.textContent.substring(0, 100) : ''
+                                textContent: el.textContent ? el.textContent.substring(0, 100) : '',
+                                children: Array.from(el.children || []).map(child => ({
+                                    tagName: child.tagName,
+                                    className: child.className,
+                                    textContent: child.textContent ? child.textContent.substring(0, 50) : ''
+                                }))
                             };
                         }
                     """, element)
                     
-                    # Generate selector
-                    selector_js = _SELECTOR_JS.strip()
-                    if selector_js.startswith('(') and selector_js.endswith(')'):
-                        selector_js = selector_js[1:-1]  # Remove outer parentheses
+                    # Check if this element contains multiple score-like child elements
+                    children = element_info.get("children", [])
+                    text_content = element_info.get("textContent", "")
+                    selector_js = _SELECTOR_JS.strip()  # Initialize with default
+                    use_direct_element = False  # Initialize flag
                     
-                    sel_result = page.evaluate(
-                        f"(el) => ({selector_js})(el)",
-                        element
-                    )
-                    selector = sel_result.get("selector", "") if sel_result else ""
+                    # Debug: Log the element info to understand structure
+                    logger.info(f"Clicked element: {element_info.get('tagName', '')}.{element_info.get('className', '')} -> '{text_content}'")
+                    logger.info(f"Found {len(children)} child elements")
                     
-                    # Enhanced fallback if primary selector fails
-                    if not selector or page.evaluate(f"document.querySelectorAll('{selector}').length !== 1"):
-                        logger.warning(f"Primary selector failed, trying fallback strategies")
+                    # Look for child elements that contain individual scores
+                    if children and len(children) >= 2:
+                        score_children = []
                         
-                        # Fallback 1: Try broader data-testid patterns
-                        testId = element.get("testId") or element.get("id")
-                        if testId and not re.match(r'^\d|:', testId):
-                            fallback_selector = '[data-testid*="' + testId + '"]'
-                            if page.evaluate(f"document.querySelectorAll('{fallback_selector}').length === 1"):
-                                selector = fallback_selector
+                        # Debug: Log all child elements to understand the structure
+                        logger.info(f"Found {len(children)} child elements:")
+                        for i, child in enumerate(children):
+                            child_text = child.get("textContent", "").strip()
+                            child_tag = child.get("tagName", "")
+                            child_class = child.get("className", "")
+                            logger.info(f"  Child {i}: {child_tag}.{child_class} -> '{child_text}'")
                         
-                        # Fallback 2: Try text content matching
-                        if not selector:
-                            textContent = element.get("textContent") or ""
-                            if textContent:
-                                # Find elements with similar text content
-                                all_elements = page.evaluate("() => Array.from(document.querySelectorAll('*'))")
-                                matching_elements = []
-                                for elem in all_elements:
-                                    if elem.get("textContent") and textContent in elem.get("textContent"):
-                                        matching_elements.append(elem)
-                                if len(matching_elements) == 1:
-                                    # Generate selector for this unique element
-                                    elem_id = matching_elements[0].get("id")
-                                    elem_tag = matching_elements[0].get("tagName")
-                                    if elem_id and not re.match(r'^\d|:', elem_id):
-                                        selector = f'#{elem_id}'
+                        # Try different strategies to find score elements
+                        for i, child in enumerate(children):
+                            child_text = child.get("textContent", "").strip()
+                            child_tag = child.get("tagName", "")
+                            child_class = child.get("className", "")
+                            
+                            # Strategy 1: Look for pure numbers
+                            if re.match(r'^\d+$', child_text):
+                                score_children.append({
+                                    "element": child,
+                                    "index": i,
+                                    "text": child_text,
+                                    "strategy": "pure_number"
+                                })
+                            # Strategy 2: Look for numbers with minimal extra characters
+                            elif re.match(r'^\d+[-:\/]\d+$', child_text):
+                                # This looks like a combined score, skip it
+                                continue
+                            # Strategy 3: Look for any digits in short text (more restrictive)
+                            elif len(child_text) <= 5 and re.match(r'^\d+$', child_text):
+                                score_children.append({
+                                    "element": child,
+                                    "index": i,
+                                    "text": child_text,
+                                    "strategy": "short_pure_number"
+                                })
+                        
+                        logger.info(f"Found {len(score_children)} score-like children")
+                        
+                        # If we found multiple score-like children, we have options
+                        if len(score_children) >= 2:
+                            logger.info(f"Found {len(score_children)} score-like child elements")
+                            
+                            # ✅ Use click proximity to select the closest child to the actual click
+                            try:
+                                # Get the child closest to the click coordinates (x, y are available from the click handler)
+                                child_element = page.evaluate_handle("""
+                                    (parent, x, y) => {
+                                        const children = Array.from(parent.children);
+                                        let best = null;
+                                        let bestDist = Infinity;
+                                        let bestIndex = -1;
+
+                                        for (let i = 0; i < children.length; i++) {
+                                            const rect = children[i].getBoundingClientRect();
+                                            const cx = rect.left + rect.width / 2;
+                                            const cy = rect.top + rect.height / 2;
+
+                                            const dist = Math.hypot(cx - x, cy - y);
+
+                                            if (dist < bestDist) {
+                                                bestDist = dist;
+                                                best = children[i];
+                                                bestIndex = i;
+                                            }
+                                        }
+
+                                        return { element: best, index: bestIndex, distance: bestDist };
+                                    }
+                                """, element, x, y)
+                                
+                                if child_element:
+                                    result = child_element.evaluate("obj => ({ index: obj.index, distance: obj.distance })")
+                                    selected_index = result.get("index", 0)
+                                    selected_distance = result.get("distance", 0)
+                                    
+                                    # Find the corresponding score data
+                                    selected_child = None
+                                    for child in score_children:
+                                        if child["index"] == selected_index:
+                                            selected_child = child
+                                            break
+                                    
+                                    if selected_child:
+                                        value = selected_child["text"]
+                                        logger.info(f"Using child closest to click: index {selected_index}, text '{value}', distance {selected_distance} (strategy: {selected_child['strategy']})")
+                                        
+                                        # Use the robust selector generation on the child element
+                                        child_selector_result = page.evaluate(_SELECTOR_JS.strip(), child_element)
+                                        if child_selector_result:
+                                            selector = child_selector_result.get("selector", "")
+                                            logger.info(f"Generated child selector: {selector}")
+                                            
+                                            # 🔴 CRITICAL: Use child element directly, skip fallback logic
+                                            element = child_element
+                                            use_direct_element = True
+                                            
+                                            # Also log info about other scores found
+                                            other_scores = [child["text"] for child in score_children if child["index"] != selected_index]
+                                            if other_scores:
+                                                logger.info(f"Other scores available: {other_scores}")
+                                        else:
+                                            logger.warning("Failed to generate selector for child element")
+                                            use_direct_element = False
                                     else:
-                                        selector = elem_tag.lower()
-                        
-                        # Log final selector for debugging
-                        logger.info(f"Generated selector: {selector}")
-                    
-                    value = None
-                    if selector:
-                        try:
-                            el_handle = page.query_selector(selector)
-                            if el_handle:
-                                tag = el_handle.evaluate("el => el.tagName.toLowerCase()")
-                                if tag in ("input", "select", "textarea"):
-                                    value = el_handle.evaluate("el => el.value")
+                                        logger.warning(f"Selected child index {selected_index} not found in score_children")
+                                        use_direct_element = False
                                 else:
-                                    offscreen = el_handle.query_selector(".a-offscreen")
-                                    if offscreen:
-                                        value = (offscreen.text_content() or "").strip()
-                                        selector = selector + " .a-offscreen"
+                                    logger.warning("Could not find closest child to click")
+                                    use_direct_element = False
+                            except Exception as e:
+                                logger.warning(f"Error selecting closest child element: {e}")
+                                use_direct_element = False
+                        else:
+                            logger.info(f"Only found {len(score_children)} score-like children, using container")
+                            use_direct_element = False
+                    else:
+                        logger.info(f"Not enough children ({len(children)}) for score detection, using container")
+                        use_direct_element = False
+                    
+                    # Generate selector (only if not using direct element)
+                    if not use_direct_element:
+                        if selector_js.startswith('(') and selector_js.endswith(')'):
+                            selector_js = selector_js[1:-1]  # Remove outer parentheses
+                        
+                        sel_result = page.evaluate(
+                            f"(el) => ({selector_js})(el)",
+                            element
+                        )
+                        selector = sel_result.get("selector", "") if sel_result else ""
+                        
+                        # Enhanced fallback if primary selector fails
+                        if not selector or page.evaluate(f"document.querySelectorAll('{selector}').length !== 1"):
+                            logger.warning(f"Primary selector failed, trying fallback strategies")
+                            
+                            # Fallback 1: Try broader data-testid patterns
+                            testId = element_info.get("id")
+                            if testId and not re.match(r'^\d|:', testId):
+                                fallback_selector = f'[data-testid*="{testId}"]'
+                                if page.evaluate(f"document.querySelectorAll('{fallback_selector}').length === 1"):
+                                    selector = fallback_selector
+                            
+                            # Fallback 2: Try text content matching
+                            if not selector:
+                                textContent = element_info.get("textContent") or ""
+                                if textContent:
+                                    # Find elements with similar text content
+                                    all_elements = page.evaluate("() => Array.from(document.querySelectorAll('*'))")
+                                    matching_elements = []
+                                    for elem in all_elements:
+                                        if elem.get("textContent") and textContent in elem.get("textContent"):
+                                            matching_elements.append(elem)
+                                    if len(matching_elements) == 1:
+                                        # Generate selector for this unique element
+                                        elem_id = matching_elements[0].get("id")
+                                        elem_tag = matching_elements[0].get("tagName")
+                                        if elem_id and not re.match(r'^\d|:', elem_id):
+                                            selector = f'#{elem_id}'
+                                        else:
+                                            selector = elem_tag.lower()
+                            
+                            # Log final selector for debugging
+                            logger.info(f"Generated selector: {selector}")
+                    
+                    # Extract value - use direct element if child was detected
+                    if use_direct_element:
+                        # ✅ Use the child element directly
+                        el_handle = element
+                        if not value:  # value might already be set from child detection
+                            value = el_handle.evaluate("el => el.textContent.trim()")
+                    else:
+                        # ❌ Use selector (original logic)
+                        value = None
+                        if selector:
+                            try:
+                                el_handle = page.query_selector(selector)
+                                if el_handle:
+                                    tag = el_handle.evaluate("el => el.tagName.toLowerCase()")
+                                    if tag in ("input", "select", "textarea"):
+                                        value = el_handle.evaluate("el => el.value")
                                     else:
-                                        value = (el_handle.text_content() or "").strip()
-                        except Exception:
-                            pass
+                                        offscreen = el_handle.query_selector(".a-offscreen")
+                                        if offscreen:
+                                            value = (offscreen.text_content() or "").strip()
+                                            selector = selector + " .a-offscreen"
+                                        else:
+                                            value = (el_handle.text_content() or "").strip()
+                            except Exception:
+                                pass
 
                     img = screenshot_b64(page)
                     meta = _infer_value_meta(value or "")
+                    
+                    logger.info(f"CLICK: Final selection - selector: {selector}, value: {value}, use_direct_element: {use_direct_element}")
+                    
                     conn.send({
                         "type": "selected",
                         "selector": selector,
