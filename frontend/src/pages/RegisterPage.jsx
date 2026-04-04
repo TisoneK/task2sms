@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { MessageSquare } from 'lucide-react'
+import AppIcon from '../components/ui/AppIcon'
 import useAuthStore from '../store/authStore'
 import toast from 'react-hot-toast'
 
@@ -22,10 +22,7 @@ export default function RegisterPage() {
          style={{ background: 'var(--background)' }}>
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4"
-               style={{ background: 'var(--primary)' }}>
-            <MessageSquare size={22} className="text-white" />
-          </div>
+          <AppIcon size="lg" className="mx-auto mb-4" />
           <h1 className="text-2xl font-bold" style={{ color: 'var(--foreground)' }}>Create Account</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>Start automating messages today</p>
         </div>

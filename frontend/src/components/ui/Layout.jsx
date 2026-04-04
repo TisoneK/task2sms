@@ -1,11 +1,12 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, ListTodo, Bell, Send, LogOut, MessageSquare,
+  LayoutDashboard, ListTodo, Bell, Send, LogOut,
   Menu, BarChart2, Users, Zap, Database, MessageCircle, Mail,
   Settings, Globe, X
 } from 'lucide-react'
 import { useState } from 'react'
 import useAuthStore from '../../store/authStore'
+import AppIcon from './AppIcon'
 import ThemeToggle from './ThemeToggle'
 
 // Telegram paper-plane icon (matches official Telegram branding)
@@ -47,10 +48,7 @@ function SidebarContent({ onNavClick }) {
       {/* Logo — matches favicon exactly */}
       <div className="flex items-center gap-2.5 px-4 py-[14px] shrink-0"
            style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-             style={{ background: 'var(--primary)' }}>
-          <MessageSquare size={14} className="text-white" />
-        </div>
+        <AppIcon size="md" />
         <span className="font-semibold text-white text-[14px] tracking-tight">Task2SMS</span>
       </div>
 
@@ -132,10 +130,7 @@ export default function Layout() {
               <Menu size={20} />
             </button>
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md flex items-center justify-center"
-                   style={{ background: 'var(--primary)' }}>
-                <MessageSquare size={12} className="text-white" />
-              </div>
+              <AppIcon size="sm" />
               <span className="font-semibold text-sm" style={{ color: 'var(--foreground)' }}>Task2SMS</span>
             </div>
           </header>
