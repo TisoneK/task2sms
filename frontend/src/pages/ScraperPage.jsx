@@ -166,7 +166,7 @@ function validateStep(step, form, recipientInput) {
     if (!form.url.trim())      return 'URL is required'
     try { new URL(form.url) } catch { return 'URL must be a valid web address' }
     if (form.is_multi_field) {
-      const validFields = form.fields.filter(f => f.name.trim() || f.selector.trim())
+      const validFields = form.fields.filter(f => f.name && f.selector)
       if (validFields.length === 0) return 'Add at least one field with a name and selector'
       for (const f of validFields) {
         if (!f.name.trim()) return 'Each field must have a name'
@@ -176,6 +176,11 @@ function validateStep(step, form, recipientInput) {
       }
       const names = validFields.map(f => f.name)
       if (new Set(names).size !== names.length) return 'Field names must be unique'
+      
+      // Require condition expression for multi-field monitors
+      if (!form.multi_field_condition.trim()) {
+        return 'Condition expression is required - specify when this monitor should trigger'
+      }
     } else {
       if (!form.selector.trim()) return 'Selector is required'
     }
@@ -191,6 +196,160 @@ function validateStep(step, form, recipientInput) {
     if (recipients.length === 0) return 'At least one recipient is required'
   }
   return null
+}
+
+// Condition expression autocomplete input
+function ConditionExpressionInput({ value, onChange, availableFields = [] }) {
+  const [suggestions, setSuggestions] = useState([])
+  const [focused, setFocused] = useState(false)
+  const timerRef = useRef(null)
+  const inputRef = useRef(null)
+
+  const getAutocompleteSuggestions = (text, cursorPos) => {
+    if (!availableFields.length) return []
+    
+    // Get the text before cursor to find what we're completing
+    const beforeCursor = text.substring(0, cursorPos)
+    const words = beforeCursor.split(/\s+/)
+    const currentWord = words[words.length - 1] || ''
+    
+    const results = []
+    
+    // If current word looks like it could be a field name
+    if (currentWord.length >= 1 && /^[a-z_]/.test(currentWord)) {
+      for (const fieldName of availableFields) {
+        if (fieldName.startsWith(currentWord) && fieldName !== currentWord) {
+          results.push({
+            text: fieldName,
+            type: 'field',
+            description: 'Field name'
+          })
+        }
+      }
+    }
+    
+    // Also suggest operators if we're after a field
+    if (currentWord === '' && words.length >= 1) {
+      const lastWord = words[words.length - 2] || ''
+      if (availableFields.includes(lastWord)) {
+        results.push(
+          { text: '>', type: 'operator', description: 'Greater than' },
+          { text: '<', type: 'operator', description: 'Less than' },
+          { text: '>=', type: 'operator', description: 'Greater than or equal' },
+          { text: '<=', type: 'operator', description: 'Less than or equal' },
+          { text: '==', type: 'operator', description: 'Equal to' },
+          { text: '!=', type: 'operator', description: 'Not equal to' },
+          { text: '&&', type: 'operator', description: 'Logical AND' },
+          { text: '||', type: 'operator', description: 'Logical OR' }
+        )
+      }
+    }
+    
+    return results.slice(0, 6)
+  }
+
+  const handleChange = (e) => {
+    const val = e.target.value || ''
+    onChange(val)
+    
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      if (val.length >= 1) {
+        // Get cursor position
+        const cursorPos = e.target.selectionStart
+        setSuggestions(getAutocompleteSuggestions(val, cursorPos))
+      } else {
+        setSuggestions([])
+      }
+    }, 150)
+  }
+
+  const pickSuggestion = (suggestion) => {
+    if (!inputRef.current || !suggestion) return
+    
+    // Safety check - ensure value is not undefined
+    const currentValue = value || ''
+    
+    const cursorPos = inputRef.current.selectionStart
+    const beforeCursor = currentValue.substring(0, cursorPos)
+    const afterCursor = currentValue.substring(cursorPos)
+    
+    // Find the word to replace
+    const words = beforeCursor.split(/\s+/)
+    const currentWord = words[words.length - 1] || ''
+    
+    // Replace current word with suggestion
+    const suggestionText = suggestion.text || ''
+    const suggestionType = suggestion.type || 'field'
+    const newValue = beforeCursor.substring(0, beforeCursor.length - currentWord.length) + 
+                    suggestionText + 
+                    (suggestionType === 'field' ? ' ' : '') + 
+                    afterCursor
+    
+    onChange(newValue)
+    setSuggestions([])
+    
+    // Set cursor position after the inserted text
+    setTimeout(() => {
+      if (inputRef.current) {
+        const newCursorPos = beforeCursor.length - currentWord.length + suggestionText.length + 
+                            (suggestionType === 'field' ? 1 : 0)
+        inputRef.current.setSelectionRange(newCursorPos, newCursorPos)
+      }
+    }, 0)
+  }
+
+  return (
+    <div className="relative">
+      <input 
+        ref={inputRef}
+        className="input font-mono text-sm"
+        value={value || ''}
+        onChange={handleChange}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        placeholder={
+          availableFields.length >= 2
+            ? `${availableFields[0]} + ${availableFields[1]} > 150`
+            : 'home_score + away_score > 150'
+        } 
+      />
+      {focused && suggestions.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 rounded-xl overflow-hidden shadow-lg"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+          {suggestions.map((suggestion, i) => {
+            if (!suggestion || !suggestion.text) return null
+            return (
+              <button key={i} type="button"
+                onMouseDown={() => pickSuggestion(suggestion)}
+                className="w-full flex items-center justify-between px-3 py-2 text-sm text-left"
+                style={{ borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--muted)'}
+                onMouseLeave={e => e.currentTarget.style.background = ''}>
+                <div className="flex items-center gap-2">
+                  <span style={{ 
+                    color: suggestion.type === 'field' ? 'var(--primary)' : 'var(--muted-foreground)',
+                    fontFamily: suggestion.type === 'field' ? 'var(--font-mono)' : 'inherit'
+                  }}>
+                    {suggestion.text}
+                  </span>
+                  {suggestion.type === 'field' && (
+                    <span className="text-xs px-1.5 py-0.5 rounded"
+                      style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>
+                      field
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  {suggestion.description || ''}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // Field name autocomplete input
@@ -1007,16 +1166,18 @@ function MonitorModal({ onClose, onSave, initial }) {
                   <div className="space-y-1.5">
                     <label className="label">
                       Condition expression{' '}
-                      <span style={{ color: 'var(--muted-foreground)', fontWeight: 400 }}>(optional — leave blank to always trigger)</span>
+                      <span className="text-red-500" title="Required">*</span>
                     </label>
-                    <input className="input font-mono text-sm"
-                      value={form.multi_field_condition}
+                    <input 
+                      className="input font-mono text-sm"
+                      value={form.multi_field_condition || ''}
                       onChange={set('multi_field_condition')}
                       placeholder={
                         form.fields.filter(f => f.name).length >= 2
                           ? `${form.fields[0]?.name} + ${form.fields[1]?.name} > 150`
                           : 'home_score + away_score > 150'
-                      } />
+                      } 
+                    />
                     <div className="rounded-lg px-3 py-2 text-[11px] space-y-1"
                       style={{ background: 'color-mix(in srgb, #7c3aed 6%, transparent)', border: '1px solid #7c3aed33' }}>
                       <p className="font-semibold" style={{ color: '#7c3aed' }}>
@@ -1027,6 +1188,9 @@ function MonitorModal({ onClose, onSave, initial }) {
                         <li>Math.abs(bid_price - ask_price) &lt; 0.01</li>
                         <li>price &lt; 100 &amp;&amp; stock == 'In Stock'</li>
                       </ul>
+                      <p className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
+                        💡 This condition determines when your monitor triggers an alert
+                      </p>
                     </div>
                   </div>
                 </div>
