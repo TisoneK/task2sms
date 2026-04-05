@@ -63,11 +63,11 @@ def main():
     """Main workflow."""
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  python dev_workflow.py status")
-        print("  python dev_workflow.py migrate 'migration message'")
-        print("  python dev_workflow.py upgrade")
-        print("  python dev_workflow.py stamp [revision]")
-        print("  python dev_workflow.py sync  # Sync database after manual changes")
+        print("  python migration_manager.py status")
+        print("  python migration_manager.py migrate 'migration message'")
+        print("  python migration_manager.py upgrade")
+        print("  python migration_manager.py stamp [revision]")
+        print("  python migration_manager.py sync  # Sync database after manual changes")
         return
 
     command = sys.argv[1]
@@ -81,7 +81,7 @@ def main():
             return
         message = sys.argv[2]
         if create_migration(message):
-            print("Migration created successfully. Run 'python dev_workflow.py upgrade' to apply it.")
+            print("Migration created successfully. Run 'python migration_manager.py upgrade' to apply it.")
     
     elif command == "upgrade":
         if upgrade_database():

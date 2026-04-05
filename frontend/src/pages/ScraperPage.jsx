@@ -94,7 +94,9 @@ const EMPTY_FORM = {
   tags: '',
   // Multi-element fields
   is_multi_field: false,
-  multi_field_condition: '',
+  multi_field_condition: '',   // DEPRECATED — kept for legacy
+  multi_field_expression: '',  // arithmetic expression e.g. "home_score + away_score"
+  monitor_conditions: [],      // [{name, operator, comparing_value, role}]
   fields: [{ name: '', selector: '', selector_type: 'css', attribute: '', normalization: '', position: 0, tested: false, testResult: null }],
 }
 
@@ -178,9 +180,17 @@ function validateStep(step, form, recipientInput) {
       const names = validFields.map(f => f.name)
       if (new Set(names).size !== names.length) return 'Field names must be unique'
       
-      // Require condition expression for multi-field monitors
-      if (!form.multi_field_condition.trim()) {
-        return 'Condition expression is required - specify when this monitor should trigger'
+      // Require expression for multi-field monitors
+      if (!form.multi_field_expression.trim()) {
+        return 'Expression is required — specify what value to compute (e.g. home_score + away_score)'
+      }
+      // Validate each condition
+      for (const cond of form.monitor_conditions) {
+        if (!cond.name || !cond.name.trim()) return 'Each condition must have a name'
+        if (!cond.operator) return `Condition "${cond.name}" must have an operator`
+        if (cond.operator !== 'expr' && (!cond.comparing_value || !String(cond.comparing_value).trim()))
+          return `Condition "${cond.name}" must have a comparing value`
+        if (!cond.role) return `Condition "${cond.name}" must have a role (result or continuation)`
       }
     } else {
       if (!form.selector.trim()) return 'Selector is required'
@@ -193,6 +203,7 @@ function validateStep(step, form, recipientInput) {
       return 'Cron expression is required'
   }
   if (step === 'notify') {
+    if (form.notify_channels.length === 0) return 'At least one notification channel is required'
     const recipients = recipientInput.split(',').map(s => s.trim()).filter(Boolean)
     if (recipients.length === 0) return 'At least one recipient is required'
   }
@@ -532,9 +543,14 @@ function MonitorModal({ onClose, onSave, initial }) {
       time_window_start:      src.time_window_start      || '',
       time_window_end:        src.time_window_end        || '',
       skip_weekends:          src.skip_weekends          || false,
+      notify_channels:         Array.isArray(src.notify_channels) ? src.notify_channels : [],
       // Multi-field
       is_multi_field:         src.is_multi_field         || false,
       multi_field_condition:  src.multi_field_condition  || '',
+      multi_field_expression: src.multi_field_expression || '',
+      monitor_conditions: Array.isArray(src.monitor_conditions) && src.monitor_conditions.length > 0
+        ? src.monitor_conditions
+        : [],
       fields: Array.isArray(src.fields) && src.fields.length > 0
         ? src.fields.map(f => ({
             name: f.name || '', selector: f.selector || '',
@@ -802,7 +818,9 @@ function MonitorModal({ onClose, onSave, initial }) {
         stop_on_condition_met:      form.stop_on_condition_met,
         skip_initial_notification:  form.skip_initial_notification,
         is_multi_field:             form.is_multi_field,
-        multi_field_condition:      form.is_multi_field ? (form.multi_field_condition || null) : null,
+        multi_field_condition:      null,  // deprecated — no longer used
+        multi_field_expression:     form.is_multi_field ? (form.multi_field_expression || null) : null,
+        monitor_conditions:         form.is_multi_field ? (form.monitor_conditions.length > 0 ? form.monitor_conditions : null) : null,
         fields: form.is_multi_field
           ? form.fields
               .filter(f => f.name.trim() && f.selector.trim())
@@ -965,7 +983,18 @@ function MonitorModal({ onClose, onSave, initial }) {
                     <input type="checkbox" className="w-4 h-4 rounded accent-sky-600"
                       checked={form.is_multi_field}
                       onChange={e => {
-                        setForm(f => ({ ...f, is_multi_field: e.target.checked }))
+                        setForm(f => ({
+                          ...f,
+                          is_multi_field: e.target.checked,
+                          // Set a smart default message template when switching to multi-field
+                          message_template: e.target.checked
+                            ? (f.message_template === 'Monitor alert: {name} — value is now {value}'
+                                ? '{name} bet {outcome}! Score: {value} (expr: {expr_value})'
+                                : f.message_template)
+                            : (f.message_template === '{name} bet {outcome}! Score: {value} (expr: {expr_value})'
+                                ? 'Monitor alert: {name} — value is now {value}'
+                                : f.message_template)
+                        }))
                         setMultiTestResult(null)
                       }} />
                     <span className="text-sm" style={{ color: 'var(--foreground)' }}>Enable</span>
@@ -1188,21 +1217,23 @@ To fix: Set "Normalization" to "Extract numbers" in the field settings.`, {
                     </div>
                   )}
 
-                  {/* Condition builder */}
+                  {/* ── Expression field ── */}
                   <div className="space-y-1.5">
                     <label className="label">
-                      Condition expression{' '}
-                      <span className="text-red-500" title="Required">*</span>
+                      Expression <span className="text-red-500" title="Required">*</span>
+                      <span className="ml-2 font-normal text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
+                        — what value to compute from your fields
+                      </span>
                     </label>
-                    <input 
+                    <input
                       className="input font-mono text-sm"
-                      value={form.multi_field_condition || ''}
-                      onChange={set('multi_field_condition')}
+                      value={form.multi_field_expression || ''}
+                      onChange={set('multi_field_expression')}
                       placeholder={
                         form.fields.filter(f => f.name).length >= 2
-                          ? `${form.fields[0]?.name} + ${form.fields[1]?.name} > 150`
-                          : 'home_score + away_score > 150'
-                      } 
+                          ? `${form.fields[0]?.name} + ${form.fields[1]?.name}`
+                          : 'home_score + away_score'
+                      }
                     />
                     <div className="rounded-lg px-3 py-2 text-[11px] space-y-1"
                       style={{ background: 'color-mix(in srgb, #7c3aed 6%, transparent)', border: '1px solid #7c3aed33' }}>
@@ -1210,16 +1241,167 @@ To fix: Set "Normalization" to "Extract numbers" in the field settings.`, {
                         Available fields: {form.fields.filter(f => f.name).map(f => f.name).join(', ') || '—'}
                       </p>
                       <ul className="font-mono space-y-0.5 text-[10px]" style={{ color: 'var(--foreground)' }}>
-                        <li>home_score + away_score &gt; 150</li>
-                        <li>Math.abs(bid_price - ask_price) &lt; 0.01</li>
-                        <li>price &lt; 100 &amp;&amp; stock == 'In Stock'</li>
+                        <li>home_score + away_score</li>
+                        <li>Math.abs(bid_price - ask_price)</li>
+                        <li>price</li>
                       </ul>
                       <p className="text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
-                        💡 This condition determines when your monitor triggers an alert
+                        💡 This computes a value used by your conditions below
                       </p>
                     </div>
                   </div>
+
+                  {/* ── Conditions list ── */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="label mb-0">
+                        Conditions
+                        <span className="ml-2 font-normal text-[11px]" style={{ color: 'var(--muted-foreground)' }}>
+                          — evaluated against the expression result
+                        </span>
+                      </label>
+                      <button type="button"
+                        className="btn-secondary text-xs px-2 py-1"
+                        onClick={() => setForm(f => ({
+                          ...f,
+                          monitor_conditions: [
+                            ...f.monitor_conditions,
+                            { name: `condition${f.monitor_conditions.length + 1}`, operator: 'lt', comparing_value: '', role: 'result' }
+                          ]
+                        }))}>
+                        + Add condition
+                      </button>
+                    </div>
+
+                    {form.monitor_conditions.length === 0 && (
+                      <div className="rounded-lg px-3 py-3 text-[11px] text-center"
+                        style={{ background: 'var(--muted)', border: '1px dashed var(--border)', color: 'var(--muted-foreground)' }}>
+                        No conditions yet — add one to control when alerts fire
+                      </div>
+                    )}
+
+                    {form.monitor_conditions.map((cond, ci) => (
+                      <div key={ci} className="rounded-xl p-3 space-y-2"
+                        style={{ background: 'var(--muted)', border: `1px solid ${cond.role === 'continuation' ? '#0ea5e944' : '#7c3aed33'}` }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                              style={{
+                                background: cond.role === 'continuation' ? 'color-mix(in srgb, #0ea5e9 15%, transparent)' : 'color-mix(in srgb, #7c3aed 15%, transparent)',
+                                color: cond.role === 'continuation' ? '#0ea5e9' : '#7c3aed'
+                              }}>
+                              {cond.role === 'continuation' ? 'Continuation' : 'Result'}
+                            </span>
+                            <input
+                              className="input font-mono text-xs py-1"
+                              style={{ width: '120px' }}
+                              value={cond.name}
+                              onChange={e => setForm(f => {
+                                const conditions = [...f.monitor_conditions]
+                                conditions[ci] = { ...conditions[ci], name: e.target.value }
+                                return { ...f, monitor_conditions: conditions }
+                              })}
+                              placeholder={`condition${ci + 1}`}
+                            />
+                          </div>
+                          <button type="button"
+                            onClick={() => setForm(f => ({
+                              ...f,
+                              monitor_conditions: f.monitor_conditions.filter((_, i) => i !== ci)
+                            }))}
+                            className="text-xs px-2 py-0.5 rounded"
+                            style={{ color: 'var(--destructive)', background: 'color-mix(in srgb, var(--destructive) 10%, transparent)' }}>
+                            ✕
+                          </button>
+                        </div>
+
+                        {/* Role selector */}
+                        <div>
+                          <label className="label text-[10px]">Role</label>
+                          <select className="input text-xs py-1"
+                            value={cond.role}
+                            onChange={e => setForm(f => {
+                              const conditions = [...f.monitor_conditions]
+                              conditions[ci] = { ...conditions[ci], role: e.target.value }
+                              return { ...f, monitor_conditions: conditions }
+                            })}>
+                            <option value="result">Result — determines won/failed outcome &amp; whether to send alert</option>
+                            <option value="continuation">Continuation — if not met, monitor stops (event ended)</option>
+                          </select>
+                          <p className="text-[10px] mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                            {cond.role === 'result'
+                              ? '✅ Met → alert sent as "won". ✗ Not met + event over → alert sent as "failed"'
+                              : '🔄 While met → monitor keeps running. Not met → event is over, monitor stops'}
+                          </p>
+                        </div>
+
+                        {/* Operator + comparing value */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="label text-[10px]">Operator</label>
+                            <select className="input text-xs py-1"
+                              value={cond.operator}
+                              onChange={e => setForm(f => {
+                                const conditions = [...f.monitor_conditions]
+                                conditions[ci] = { ...conditions[ci], operator: e.target.value }
+                                return { ...f, monitor_conditions: conditions }
+                              })}>
+                              <option value="lt">&lt; Less than</option>
+                              <option value="lte">&lt;= Less than or equal</option>
+                              <option value="gt">&gt; Greater than</option>
+                              <option value="gte">&gt;= Greater than or equal</option>
+                              <option value="eq">= Equal to</option>
+                              <option value="neq">≠ Not equal to</option>
+                              <option value="contains">Contains</option>
+                              <option value="not_contains">Does not contain</option>
+                              <option value="expr">Custom JS expression</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="label text-[10px]">
+                              {cond.operator === 'expr' ? 'Expression (use _value for expr result)' : 'Comparing value'}
+                            </label>
+                            <input
+                              className="input font-mono text-xs py-1"
+                              value={cond.comparing_value}
+                              onChange={e => setForm(f => {
+                                const conditions = [...f.monitor_conditions]
+                                conditions[ci] = { ...conditions[ci], comparing_value: e.target.value }
+                                return { ...f, monitor_conditions: conditions }
+                              })}
+                              placeholder={cond.operator === 'expr' ? '_value > 163.5 && _value < 200' : '174'}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Preview */}
+                        <p className="text-[10px] font-mono rounded px-2 py-1"
+                          style={{ background: 'color-mix(in srgb, var(--primary) 5%, transparent)', color: 'var(--muted-foreground)' }}>
+                          {(() => {
+                            const exprLabel = form.multi_field_expression || 'expr_result'
+                            if (cond.operator === 'expr') return `eval(${cond.comparing_value || '…'})`
+                            const opMap = { lt: '<', lte: '<=', gt: '>', gte: '>=', eq: '==', neq: '!=', contains: 'contains', not_contains: '!contains' }
+                            return `${exprLabel} ${opMap[cond.operator] || cond.operator} ${cond.comparing_value || '…'}`
+                          })()}
+                        </p>
+                      </div>
+                    ))}
+
+                    {form.monitor_conditions.length > 0 && (
+                      <div className="rounded-lg px-3 py-2 text-[11px] space-y-1"
+                        style={{ background: 'color-mix(in srgb, #16a34a 6%, transparent)', border: '1px solid #16a34a33' }}>
+                        <p className="font-semibold" style={{ color: '#16a34a' }}>💡 How it works</p>
+                        <ul className="space-y-0.5 text-[10px]" style={{ color: 'var(--muted-foreground)' }}>
+                          <li><strong>Result</strong> conditions: if met → message says "won". If not met when event ends → "failed".</li>
+                          <li><strong>Continuation</strong> conditions: while met → keep running. Not met → event over, monitor stops.</li>
+                          <li>For an <em>over</em> bet: if result met mid-match → alert fires immediately (no need to wait for event end).</li>
+                          <li>For an <em>under</em> bet: result is only confirmed once the continuation condition ends.</li>
+                        </ul>
+                      </div>
+                    )}
+                  </div>
                 </div>
+
               ) : (
                 /* ── SINGLE-FIELD MODE ── */
                 <div className="space-y-4">
@@ -1551,6 +1733,11 @@ To fix: Set "Normalization" to "Extract numbers" in the field settings.`, {
                   value={form.message_template} onChange={set('message_template')} />
                 <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
                   Variables: <code>{'{name}'}</code> <code>{'{value}'}</code> <code>{'{prev_value}'}</code> <code>{'{url}'}</code>
+                  {form.is_multi_field && (
+                    <> <code>{'{outcome}'}</code> <code>{'{result}'}</code> <code>{'{expr_value}'}</code>
+                      <span className="ml-1 text-[10px]">— outcome/result = "won" or "failed"</span>
+                    </>
+                  )}
                 </p>
 
                 {/* Live preview — uses actual form values, not hardcoded */}
@@ -1988,8 +2175,14 @@ function MonitorCard({ m, onEdit, onDelete, onToggle, onCheck, onClone, checking
                     {(m.fields || []).length} fields
                   </span>
                   {(m.fields || []).map(f => f.name).join(', ')}
-                  {m.multi_field_condition && (
+                  {m.multi_field_expression && (
+                    <span className="ml-1 opacity-70 font-mono">· expr: {m.multi_field_expression}</span>
+                  )}
+                  {!m.multi_field_expression && m.multi_field_condition && (
                     <span className="ml-1 opacity-60 font-mono">· {m.multi_field_condition}</span>
+                  )}
+                  {Array.isArray(m.monitor_conditions) && m.monitor_conditions.length > 0 && (
+                    <span className="ml-1 opacity-60">· {m.monitor_conditions.length} condition{m.monitor_conditions.length !== 1 ? 's' : ''}</span>
                   )}
                 </>
               ) : (

@@ -426,24 +426,18 @@ class _MathShim:
     round = staticmethod(round)
 
 
-def _evaluate_multi_field_condition(field_values, norm_values, condition):
-    """
-    Evaluate a JS-like boolean expression over named field values.
-    Returns (condition_met: bool, summary_value: str).
-    """
-    parts = [f"{k}={norm_values.get(k) if norm_values.get(k) is not None else field_values.get(k)}"
-             for k in field_values]
-    summary = " | ".join(parts)
-
-    if not condition:
-        return True, summary
-
+def _build_namespace(field_values: dict, norm_values: dict) -> dict:
+    """Build evaluation namespace from field values."""
     namespace = {"_math_abs": abs, "_math_max": max, "_math_min": min, "_math_round": round}
-    for name, norm in norm_values.items():
-        namespace[name] = norm if norm is not None else field_values.get(name)
+    for name in field_values:
+        namespace[name] = norm_values.get(name) if norm_values.get(name) is not None else field_values.get(name)
+    return namespace
 
-    py_cond = (
-        condition
+
+def _py_expr(expr: str) -> str:
+    """Convert JS-style boolean expression to Python."""
+    return (
+        expr
         .replace("&&", " and ")
         .replace("||", " or ")
         .replace("Math.abs", "_math_abs")
@@ -452,13 +446,145 @@ def _evaluate_multi_field_condition(field_values, norm_values, condition):
         .replace("Math.round", "_math_round")
     )
 
+
+def _evaluate_expression(field_values: dict, norm_values: dict, expression: str) -> Optional[str]:
+    """
+    Evaluate an arithmetic/string expression over named field values.
+    Returns the string result, or None on error.
+    e.g. "home_score + away_score" → "174"
+    """
+    if not expression or not expression.strip():
+        return None
+    namespace = _build_namespace(field_values, norm_values)
     try:
-        result = bool(eval(py_cond, {"__builtins__": {}}, namespace))  # noqa: S307
+        result = eval(_py_expr(expression), {"__builtins__": {}}, namespace)  # noqa: S307
+        if isinstance(result, float) and result == int(result):
+            return str(int(result))
+        if isinstance(result, float):
+            return f"{result:.6f}".rstrip("0").rstrip(".")
+        return str(result)
+    except Exception as e:
+        logger.warning(f"Expression eval failed: {e!s} — expr: {expression}")
+        return None
+
+
+def _evaluate_condition_obj(expr_value: Optional[str], field_values: dict, norm_values: dict,
+                             condition: dict) -> bool:
+    """
+    Evaluate a single condition dict against the computed expression value or field values.
+    condition = {name, operator, comparing_value, role}
+    The left-hand side is `expr_value` (output of the expression), or if the expression is
+    a bare field reference (e.g. "status"), the field value is used directly.
+    Supports operators: gt, gte, lt, lte, eq, neq, contains, not_contains
+    Also supports JS boolean expressions as `operator == "expr"` with `comparing_value` as expr.
+    """
+    operator = condition.get("operator", "")
+    comparing_value = condition.get("comparing_value", "")
+
+    # The value we check against: prefer the expression result
+    check_value = expr_value
+
+    # If operator is a JS expression (advanced mode), evaluate it directly
+    if operator == "expr":
+        namespace = _build_namespace(field_values, norm_values)
+        # also expose computed expression result as '_value'
+        if expr_value is not None:
+            try:
+                namespace["_value"] = float(expr_value) if "." in str(expr_value) else int(expr_value)
+            except (ValueError, TypeError):
+                namespace["_value"] = expr_value
+        try:
+            return bool(eval(_py_expr(comparing_value), {"__builtins__": {}}, namespace))  # noqa: S307
+        except Exception as e:
+            logger.warning(f"Condition expr eval failed: {e!s} — expr: {comparing_value}")
+            return False
+
+    return _check_condition(check_value, operator, comparing_value)
+
+
+def _evaluate_multi_field_condition(field_values: dict, norm_values: dict, condition: Optional[str]):
+    """
+    LEGACY: Evaluate a JS-like boolean expression over named field values.
+    Returns (condition_met: bool, summary_value: str).
+    Kept for backwards-compat with old monitors that have multi_field_condition set.
+    """
+    parts = [f"{k}={norm_values.get(k) if norm_values.get(k) is not None else field_values.get(k)}"
+             for k in field_values]
+    summary = " | ".join(parts)
+
+    if not condition:
+        return True, summary
+
+    namespace = _build_namespace(field_values, norm_values)
+    try:
+        result = bool(eval(_py_expr(condition), {"__builtins__": {}}, namespace))  # noqa: S307
     except Exception as e:
         logger.warning(f"Multi-field condition eval failed: {e!s} — expr: {condition}")
         result = False
 
     return result, summary
+
+
+def _evaluate_conditions_new(
+    field_values: dict,
+    norm_values: dict,
+    expression: Optional[str],
+    conditions: Optional[list],
+) -> tuple:
+    """
+    New conditions evaluation.
+
+    Returns:
+        (expr_value, condition_results, should_send, should_stop, summary)
+
+    - expr_value:        string result of the expression (e.g. "174")
+    - condition_results: list of {name, role, met} for each condition
+    - should_send:       True if result-role condition(s) are met OR no conditions at all
+    - should_stop:       True if continuation condition(s) are NOT met (event ended)
+    - summary:           human-readable summary
+    """
+    # Build summary from field values
+    parts = [f"{k}={norm_values.get(k) if norm_values.get(k) is not None else field_values.get(k)}"
+             for k in field_values]
+
+    # Evaluate expression
+    expr_value = _evaluate_expression(field_values, norm_values, expression) if expression else None
+
+    if expr_value is not None:
+        summary = f"expr={expr_value} | " + " | ".join(parts)
+    else:
+        summary = " | ".join(parts)
+
+    if not conditions:
+        # No conditions → always trigger
+        return expr_value, [], True, False, summary
+
+    condition_results = []
+    result_conditions_met = []
+    continuation_conditions_met = []
+
+    for cond in conditions:
+        role = cond.get("role", "result")
+        met = _evaluate_condition_obj(expr_value, field_values, norm_values, cond)
+        condition_results.append({"name": cond.get("name", ""), "role": role, "met": met})
+        if role == "result":
+            result_conditions_met.append(met)
+        elif role == "continuation":
+            continuation_conditions_met.append(met)
+
+    # should_send: at least one result condition met (or no result conditions)
+    if result_conditions_met:
+        should_send = any(result_conditions_met)
+    else:
+        should_send = True  # no result conditions → always send
+
+    # should_stop: any continuation condition is NOT met → event is over
+    if continuation_conditions_met:
+        should_stop = not all(continuation_conditions_met)
+    else:
+        should_stop = False  # no continuation conditions → keep running
+
+    return expr_value, condition_results, should_send, should_stop, summary
 
 
 async def _do_multi_field_check(monitor, db):
@@ -479,7 +605,7 @@ async def _do_multi_field_check(monitor, db):
     fields = list(rows.scalars().all())
 
     if not fields:
-        return None, False, "No fields configured for multi-field monitor", 0, 0, "unknown", []
+        return None, False, "No fields configured for multi-field monitor", 0, 0, "unknown", [], None, [], False
 
     start = time.monotonic()
     retry_attempts = getattr(monitor, "retry_attempts", 3) or 1
@@ -528,18 +654,36 @@ async def _do_multi_field_check(monitor, db):
                 })
 
             duration_ms = int((time.monotonic() - start) * 1000)
-            condition_met, summary = _evaluate_multi_field_condition(
-                field_values, norm_values,
-                getattr(monitor, "multi_field_condition", None),
-            )
-            return summary, condition_met, None, duration_ms, attempt, fetch_result.method, field_results_data
+
+            # Determine which evaluation path to use
+            expression = getattr(monitor, "multi_field_expression", None)
+            conditions_list = getattr(monitor, "monitor_conditions", None)
+            legacy_condition = getattr(monitor, "multi_field_condition", None)
+
+            if conditions_list is not None or expression is not None:
+                # New path: expression + conditions
+                expr_value, condition_results, should_send, should_stop, summary = _evaluate_conditions_new(
+                    field_values, norm_values, expression, conditions_list
+                )
+                # Encode extra info into summary for logging
+                condition_met = should_send
+                # Attach extra context to the return for run_monitor_and_notify
+                return (summary, condition_met, None, duration_ms, attempt, fetch_result.method,
+                        field_results_data, expr_value, condition_results, should_stop)
+            else:
+                # Legacy path
+                condition_met, summary = _evaluate_multi_field_condition(
+                    field_values, norm_values, legacy_condition
+                )
+                return (summary, condition_met, None, duration_ms, attempt, fetch_result.method,
+                        field_results_data, None, [], False)
 
         except Exception as e:
             last_err = str(e)
             logger.warning(f"Monitor {monitor.id} multi-field attempt {attempt + 1} failed: {e}")
 
     duration_ms = int((time.monotonic() - start) * 1000)
-    return None, False, last_err, duration_ms, retry_attempts - 1, "unknown", []
+    return None, False, last_err, duration_ms, retry_attempts - 1, "unknown", [], None, [], False
 
 
 async def _do_check(monitor: ScraperMonitor) -> tuple:
@@ -594,9 +738,11 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
 
     if is_multi:
         # ── Multi-field path ──────────────────────────────────────────────
-        value, condition_met, error, duration_ms, retry_num, fetch_method, field_results_data = (
-            await _do_multi_field_check(monitor, db)
-        )
+        result_tuple = await _do_multi_field_check(monitor, db)
+        value, condition_met, error, duration_ms, retry_num, fetch_method, field_results_data = result_tuple[:7]
+        expr_value = result_tuple[7] if len(result_tuple) > 7 else None
+        condition_results = result_tuple[8] if len(result_tuple) > 8 else []
+        should_stop = result_tuple[9] if len(result_tuple) > 9 else False
         log.duration_ms = duration_ms
         log.retry_num = retry_num
         log.fetch_method = fetch_method
@@ -630,6 +776,11 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
             else:
                 monitor.fail_count = (getattr(monitor, "fail_count", 0) or 0) + 1
             monitor.consecutive_failures = 0
+
+            # Store new-style condition data on log object (runtime only, for run_monitor_and_notify)
+            log._expr_value = expr_value
+            log._condition_results = condition_results  # [{name, role, met}]
+            log._should_stop = should_stop
 
             # Flush log to get its id, then persist field results
             await db.flush()
@@ -720,32 +871,96 @@ async def check_monitor(db: AsyncSession, monitor: ScraperMonitor) -> ScraperChe
 
 async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
     log = await check_monitor(db, monitor)
-    if not log.condition_met:
-        return log
 
-    # Check if this is the first run and we should skip notification
-    is_first_run = monitor.last_checked_at is None
-    if is_first_run and getattr(monitor, 'skip_initial_notification', True):
-        logger.info(f"Monitor {monitor.id}: Skipping initial notification (first run)")
-        return log
+    # ── New-style: expression + named conditions ──────────────────────────────
+    is_multi = getattr(monitor, "is_multi_field", False)
+    conditions_list = getattr(monitor, "monitor_conditions", None)
+    has_new_conditions = is_multi and conditions_list is not None
 
-    # Check if monitor should stop after condition met
-    if getattr(monitor, 'stop_on_condition_met', True):
-        monitor.status = MonitorStatus.PAUSED
-        # Don't use error_message for informational messages - use a different approach
-        logger.info(f"Monitor {monitor.id}: Auto-paused after condition met")
+    if has_new_conditions:
+        expr_value = getattr(log, "_expr_value", None)
+        condition_results = getattr(log, "_condition_results", [])
+        should_stop = getattr(log, "_should_stop", False)
 
-    context = {
-        "name": monitor.name,
-        "url": monitor.url,
-        "value": log.value_found if log.value_found is not None else "N/A",
-        "selector": monitor.selector,
-        "prev_value": (getattr(log, "prev_value", None) or "N/A"),
-    }
-    try:
-        message = monitor.message_template.format(**context)
-    except (KeyError, ValueError):
-        message = monitor.message_template
+        # Result conditions determine if we won/failed
+        result_conditions = [c for c in condition_results if c.get("role") == "result"]
+        continuation_conditions = [c for c in condition_results if c.get("role") == "continuation"]
+
+        result_won = all(c["met"] for c in result_conditions) if result_conditions else None
+        event_over = should_stop
+
+        # Decide whether to send message now:
+        # - Over-bets (result won) → send immediately even mid-match
+        # - Under-bets (result not yet known) → wait until event ends
+        if result_won is True:
+            should_send_now = True
+        elif result_won is False and event_over:
+            should_send_now = True
+        elif result_won is None:
+            should_send_now = log.condition_met
+        else:
+            # result_won is False and event still running → don't send yet
+            should_send_now = False
+
+        if not should_send_now:
+            if event_over:
+                monitor.status = MonitorStatus.PAUSED
+                await db.commit()
+                logger.info(f"Monitor {monitor.id}: Event over, no send needed, pausing")
+            return log
+
+        outcome_label = "won" if result_won else ("failed" if result_won is False else "triggered")
+        context = {
+            "name": monitor.name,
+            "url": monitor.url,
+            "value": log.value_found if log.value_found is not None else "N/A",
+            "expr_value": expr_value or "N/A",
+            "selector": monitor.selector,
+            "prev_value": (getattr(log, "prev_value", None) or "N/A"),
+            "outcome": outcome_label,
+            "result": outcome_label,
+        }
+        for cr in condition_results:
+            safe_name = cr["name"].replace(" ", "_")
+            context[f"condition_{safe_name}"] = "met" if cr["met"] else "not met"
+            context[f"{safe_name}_met"] = cr["met"]
+
+        try:
+            message = monitor.message_template.format(**context)
+        except (KeyError, ValueError):
+            message = monitor.message_template
+
+        if event_over or getattr(monitor, "stop_on_condition_met", True):
+            monitor.status = MonitorStatus.PAUSED
+            logger.info(f"Monitor {monitor.id}: Pausing — event_over={event_over}")
+
+    else:
+        # ── Legacy / single-field path ────────────────────────────────────────
+        if not log.condition_met:
+            return log
+
+        is_first_run = monitor.last_checked_at is None
+        if is_first_run and getattr(monitor, "skip_initial_notification", True):
+            logger.info(f"Monitor {monitor.id}: Skipping initial notification (first run)")
+            return log
+
+        if getattr(monitor, "stop_on_condition_met", True):
+            monitor.status = MonitorStatus.PAUSED
+            logger.info(f"Monitor {monitor.id}: Auto-paused after condition met")
+
+        context = {
+            "name": monitor.name,
+            "url": monitor.url,
+            "value": log.value_found if log.value_found is not None else "N/A",
+            "selector": monitor.selector,
+            "prev_value": (getattr(log, "prev_value", None) or "N/A"),
+            "outcome": "triggered",
+            "result": "triggered",
+        }
+        try:
+            message = monitor.message_template.format(**context)
+        except (KeyError, ValueError):
+            message = monitor.message_template
 
     channels = monitor.notify_channels or []
     recipients = monitor.notify_recipients or []
@@ -814,7 +1029,6 @@ async def run_monitor_and_notify(db: AsyncSession, monitor: ScraperMonitor):
             logger.warning(f"bump_use_count failed: {e}")
 
     return log
-
 
 # ── Query helpers ─────────────────────────────────────────────────────────────
 

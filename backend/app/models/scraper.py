@@ -92,7 +92,18 @@ class ScraperMonitor(Base):
 
     # Multi-element fields support
     is_multi_field = Column(Boolean, default=False, nullable=False, server_default='0')
-    multi_field_condition = Column(Text, nullable=True)  # JS expression e.g. "home_score + away_score > 150"
+    multi_field_condition = Column(Text, nullable=True)  # DEPRECATED: kept for backwards-compat
+
+    # Expression + Conditions (new, replaces multi_field_condition)
+    # multi_field_expression: arithmetic/string expression over named fields
+    #   e.g. "home_score + away_score"  or just  "status"
+    multi_field_expression = Column(Text, nullable=True)
+
+    # monitor_conditions: list of condition dicts
+    # Each: { "name": str, "operator": str, "comparing_value": str, "role": "result"|"continuation" }
+    # role="result"       → if met, message includes "won"; if not, includes "failed"
+    # role="continuation" → if NOT met, monitor stops (match ended / event over)
+    monitor_conditions = Column(JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

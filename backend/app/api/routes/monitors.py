@@ -70,7 +70,9 @@ class MonitorCreate(BaseModel):
     extra_headers: Optional[dict] = None
     # Multi-element fields
     is_multi_field: bool = False
-    multi_field_condition: Optional[str] = None   # JS-like expression e.g. "home_score + away_score > 150"
+    multi_field_condition: Optional[str] = None   # DEPRECATED: kept for backwards-compat
+    multi_field_expression: Optional[str] = None  # arithmetic expression over field names e.g. "home_score + away_score"
+    monitor_conditions: Optional[List[dict]] = None  # [{name, operator, comparing_value, role}]
     fields: Optional[List[MonitorFieldCreate]] = []
 
 
@@ -108,7 +110,9 @@ class MonitorUpdate(BaseModel):
     tags: Optional[List[str]] = None
     # Multi-element fields
     is_multi_field: Optional[bool] = None
-    multi_field_condition: Optional[str] = None
+    multi_field_condition: Optional[str] = None  # DEPRECATED
+    multi_field_expression: Optional[str] = None
+    monitor_conditions: Optional[List[dict]] = None
     fields: Optional[List[MonitorFieldCreate]] = None   # full replacement of fields list
 
 
@@ -172,6 +176,8 @@ def _out(m: ScraperMonitor) -> dict:
         # Multi-element fields
         "is_multi_field": getattr(m, "is_multi_field", False),
         "multi_field_condition": getattr(m, "multi_field_condition", None),
+        "multi_field_expression": getattr(m, "multi_field_expression", None),
+        "monitor_conditions": getattr(m, "monitor_conditions", None),
         "fields": [_field_out(f) for f in (m.fields if hasattr(m, "fields") and m.fields else [])],
     }
 
