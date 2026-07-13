@@ -6,7 +6,17 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from app.core.config import settings
 from app.core.database import Base
-from app.models import user, task, notification  # noqa
+# Import EVERY model so `alembic revision --autogenerate` sees all tables.
+# Previously only user/task/notification were imported — autogenerate
+# silently missed webhook, datasource, organization, scraper,
+# email_notification, whatsapp, telegram, and contact tables, so any
+# schema change to those tables would not produce a migration.
+# Finding F23 from the 2026-07-13 review.
+from app.models import (  # noqa: F401
+    user, task, notification, organization, webhook,
+    datasource, scraper, email_notification, whatsapp,
+    telegram, contact,
+)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
