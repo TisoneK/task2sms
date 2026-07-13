@@ -32,6 +32,12 @@ _INSECURE_DEFAULTS = {
 # (e.g. empty string, wildcard, scheme-relative) doesn't quietly weaken CORS.
 _URL_RE = re.compile(r"^https?://[A-Za-z0-9.\-]+(:\d+)?(/.*)?$")
 
+# NOTE: DATABASE_URL is validated in app/core/database.py (not here) because
+# `create_async_engine` is called at module-top import time, before the
+# lifespan runs this validator. The database.py wrapper turns the cryptic
+# `sqlalchemy.exc.ArgumentError` into a clear actionable message. See
+# finding F27 from the 2026-07-13 review.
+
 
 def _validate_runtime_config() -> None:
     """Fail fast on insecure defaults / malformed config in non-DEBUG mode."""
