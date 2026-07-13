@@ -120,7 +120,24 @@ async def bump_use_count(db: AsyncSession, user_id: int, values: list[str]):
         if c:
             c.use_count = (c.use_count or 0) + 1
         else:
-            # Auto-create from recipient string — infer type
-            t = "email" if "@" in val else "telegram" if val.lstrip("-").isdigit() and len(val) > 6 else "phone"
+            # Auto-create from recipient string — infer type.
+            # Note: this is a best-effort guess for newly-seen recipients
+            # when the caller didn't pass an explicit type. Phone numbers
+            # like "-1234567" previously misclassified as "telegram"
+            # because the old check `val.lstrip("-").isdigit() and
+            # len(val) > 6` matched any 7+ digit string. The new check
+            # requires the canonical Telegram chat-id shape (positive
+            # integer, no leading dash, 6+ digits). Phone numbers with a
+            # leading "+" or non-digit characters fall through to "phone".
+            # Finding F20 from the 2026-07-13 review.
+            if "@" in val:
+                t = "email"
+            elif val.isdigit() and len(val) >= 6:
+                # Pure-digit string with no + prefix and no @ — most
+                # likely a Telegram chat id (phone numbers usually carry
+                # a + or have non-digit separators).
+                t = "telegram"
+            else:
+                t = "phone"
             db.add(Contact(user_id=user_id, type=t, value=val, use_count=1))
     await db.commit()

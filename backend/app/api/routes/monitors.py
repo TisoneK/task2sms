@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from pydantic import BaseModel
 from typing import List, Optional
 from app.core.database import get_db
@@ -188,11 +189,17 @@ async def list_monitors(db: AsyncSession = Depends(get_db),
     monitors = []
     for m in await get_monitors(db, current_user.id):
         monitor_data = _out(m)
-        # Get latest condition_met status
-        from sqlalchemy import select, text
+        # Get latest condition_met status. Replaced raw SQL text() with an
+        # ORM select() — same semantics, but portable across SQLite /
+        # PostgreSQL (the text() version used SQLite-specific LIMIT 1 in
+        # the query string, though SQLAlchemy's .limit() emits the right
+        # dialect anyway). Finding F15 from the 2026-07-13 review.
+        from app.models.scraper import ScraperCheckLog
         result = await db.execute(
-            text("SELECT condition_met FROM scraper_check_logs WHERE monitor_id = :mid ORDER BY checked_at DESC LIMIT 1"),
-            {"mid": m.id}
+            select(ScraperCheckLog.condition_met)
+            .where(ScraperCheckLog.monitor_id == m.id)
+            .order_by(ScraperCheckLog.checked_at.desc())
+            .limit(1)
         )
         latest_condition = result.scalar_one_or_none()
         monitor_data["last_condition_met"] = latest_condition
