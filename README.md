@@ -87,6 +87,74 @@ docker-compose up -d
 
 ---
 
+## Railway (Single-Service Hosting)
+
+Host the frontend and backend on **one Railway service** — one container, one port, one billable unit. The FastAPI app serves both `/api/*` (API) and `/*` (built React SPA) from a single uvicorn process. No nginx, no second container.
+
+### One-time setup
+
+1. **Create a Railway project** and add this repo. Railway auto-detects the root `Dockerfile` and `railway.toml`.
+2. **Add a Postgres plugin** (recommended) — Railway provides a `DATABASE_URL` you'll wire in below. Alternatively, use the built-in `/app/data` volume mount with SQLite (no plugin needed, but data is lost if the volume is detached).
+3. **Set these required environment variables** in the Railway service (Settings → Variables):
+
+   | Variable | Value |
+   |---|---|
+   | `SECRET_KEY` | A random 32+ char string (e.g. `openssl rand -hex 32`). **Must not** be the placeholder. |
+   | `WEBHOOK_SECRET` | Another random string. **Must not** be the placeholder. |
+   | `FRONTEND_URL` | `https://<your-service>.up.railway.app` (your Railway domain — generate one in Settings → Networking). |
+   | `DATABASE_URL` | From the Postgres plugin's "Connect" tab. Format: `postgresql+asyncpg://...`. (If using SQLite + volume instead: `sqlite+aiosqlite:////app/data/task2sms.db`.) |
+
+4. **Generate a Railway domain** (Settings → Networking → Generate Domain). The app won't pass the startup validator until `FRONTEND_URL` is set to this domain.
+5. **Deploy.** Railway builds the image, runs `alembic upgrade head` as a preDeploy step, then starts uvicorn on `$PORT`. The healthcheck pings `/api/health`.
+
+### What the single-service image does
+
+- **Builds the frontend** in a Node 20 stage, copies `dist/` into the backend image at `/app/static`.
+- **Backend serves the SPA** when `STATIC_DIR=/app/static` (set automatically by the Dockerfile). `main.py` mounts `/assets/` as `StaticFiles` and adds a catch-all that returns `index.html` for client-side routes (`/login`, `/tasks/123`, etc.). API routes under `/api/*` always take precedence.
+- **Security headers** (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`) are applied by a FastAPI middleware — moved from the old `nginx.conf` so the single-service deploy keeps them without nginx.
+- **Migrations** run on every container start (`alembic upgrade head` in the CMD) AND as a Railway `preDeployCommand`. Idempotent — safe to run twice.
+- **Healthcheck** at `/api/health` returns `{"status":"ok","version":"1.0.0"}` without touching the DB, so Railway can verify the service is up before routing traffic.
+
+### Optional environment variables
+
+Set per feature — see `backend/.env.example` for the full list. The most common:
+
+- **SMS:** `DEFAULT_SMS_PROVIDER`, `AT_USERNAME`, `AT_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`
+- **WhatsApp:** `WHATSAPP_PROVIDER`, `WHATSAPP_FROM`
+- **Telegram:** `TELEGRAM_BOT_TOKEN`
+- **Email:** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
+- **Webhooks:** `WEBHOOK_SECRET` (required — see above)
+
+### Local test of the same image
+
+```bash
+docker build -t task2sms .
+docker run -p 8000:8000 \
+  -e SECRET_KEY=$(openssl rand -hex 32) \
+  -e WEBHOOK_SECRET=$(openssl rand -hex 32) \
+  -e FRONTEND_URL=http://localhost:8000 \
+  -e DATABASE_URL=sqlite+aiosqlite:////app/data/task2sms.db \
+  -v task2sms-data:/app/data \
+  task2sms
+```
+
+Then visit **http://localhost:8000** (frontend), **http://localhost:8000/docs** (API docs).
+
+### Railway vs Docker Compose — which to pick?
+
+| | Railway (single service) | Docker Compose (two services) |
+|---|---|---|
+| Hosting | Railway (managed) | Any Docker host (VPS, self-hosted) |
+| Services | 1 container, 1 port | 2 containers (nginx + uvicorn) |
+| Billable units | 1 | 2 (or 1 VPS) |
+| SSL/TLS | Automatic (Railway domain) | Bring your own (Caddy/traefik/etc.) |
+| Persistent storage | Railway volume or Postgres plugin | `./data` bind mount |
+| Use when | You want managed hosting with zero ops | You want full control / self-host |
+
+Both deployment paths are maintained. Pick one based on your hosting target — the codebase supports both.
+
+---
+
 ## Configuration
 
 All settings in `backend/.env` (copy from `.env.example`):
@@ -348,7 +416,9 @@ task2sms/
 │       ├── hooks/             # useStats, useTasks, useNotifications
 │       ├── services/          # Axios API client
 │       └── store/             # Zustand: auth + theme
-├── docker-compose.yml
+├── Dockerfile                 # Single-service image (Railway / any container host)
+├── railway.toml               # Railway config-as-code (healthcheck, preDeploy, volume)
+├── docker-compose.yml         # Two-service Compose stack (nginx + uvicorn)
 ├── .env.example
 └── README.md
 ```
