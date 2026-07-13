@@ -1,0 +1,61 @@
+# Build context hygiene for the single-service Docker image.
+# Keep this tight — the build context is sent to the Docker daemon on
+# every `docker build`, and a fat context slows the build.
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/venv/
+**/.venv/
+**/*.egg-info/
+
+# Node
+**/node_modules/
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/.npm/
+**/dist/
+# NOTE: do NOT ignore frontend/dist here — the Dockerfile builds it
+# inside stage 1, so this rule is correct. But if you pre-build the
+# frontend and want to COPY it in instead, comment this out.
+
+# Build artifacts / local state
+**/*.db
+**/*.db-journal
+**/data/
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Editor / OS
+**/.vscode/
+**/.idea/
+**/.DS_Store
+**/Thumbs.db
+
+# Docs / agent memory (not needed in the runtime image)
+README.md
+docs/
+.context/
+
+# Existing per-service Dockerfiles (kept for backwards compat, but the
+# root Dockerfile is the single-service one — don't ship the others
+# into the build context).
+docker-compose.yml
+backend/Dockerfile
+frontend/Dockerfile
+frontend/nginx.conf
+
+# Scripts not needed at runtime
+scripts/

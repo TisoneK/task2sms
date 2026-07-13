@@ -1,0 +1,48 @@
+# Railway configuration — single-service deploy.
+#
+# Docs: https://railway.com/docs/config-as-code
+#
+# Topology: ONE Railway service hosts both the FastAPI backend and the
+# built React SPA. The Dockerfile at the repo root builds a multi-stage
+# image (frontend build → bake into backend image). uvicorn serves
+# /api/* (API) and /* (SPA) from one process on $PORT.
+#
+# Required Railway variables (set in the Railway dashboard or via `railway
+# variables set`):
+#   SECRET_KEY       — JWT signing secret (NOT the default placeholder)
+#   WEBHOOK_SECRET   — HMAC signing secret (NOT the default placeholder)
+#   FRONTEND_URL     — https://<this-service>.up.railway.app (your Railway domain)
+#   DATABASE_URL     — postgresql+asyncpg://... (from Railway Postgres plugin)
+#                      OR sqlite+aiosqlite:////app/data/task2sms.db (volume mount)
+#
+# Optional (set per-feature):
+#   AT_USERNAME, AT_API_KEY, AT_SENDER_ID          — Africa's Talking
+#   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER  — Twilio
+#   TELEGRAM_BOT_TOKEN                              — Telegram
+#   SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM_EMAIL, SMTP_FROM_NAME
+#   WHATSAPP_PROVIDER, WHATSAPP_FROM
+
+[build]
+  builder = "dockerfile"
+  dockerfilePath = "Dockerfile"
+
+[deploy]
+  # Railway's HTTP healthcheck pings this path; /api/health returns
+  # {"status":"ok","version":"1.0.0"} without touching the DB.
+  healthcheckPath = "/api/health"
+  healthcheckTimeout = 30
+  # Restart policy: Railway restarts automatically; this is belt-and-braces.
+  restartPolicyType = "ON_FAILURE"
+  restartPolicyMaxRetries = 3
+  # Migrations run BEFORE the service starts (Railway runs preDeployCommand
+  # in a fresh container using the built image, then starts the main
+  # container). `alembic upgrade head` is idempotent — safe on every deploy.
+  preDeployCommand = "alembic upgrade head"
+
+# Persistent volume for SQLite (only used if DATABASE_URL points at
+# /app/data/task2sms.db — if you wire up the Railway Postgres plugin
+# instead, this volume is simply unused).
+# The mount path MUST match the SQLite path in DATABASE_URL.
+[[volume]]
+  name = "task2sms-data"
+  mountPath = "/app/data"
