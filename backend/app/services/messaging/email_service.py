@@ -11,8 +11,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Inline Jinja2 env for rendering templates
-_jinja = Environment(loader=BaseLoader())
+# Inline Jinja2 env for rendering templates.
+# autoescape=True is mandatory: user-controlled content (email body, task
+# variables) flows into these templates, and without autoescape a
+# <script>...</script> payload in any field is delivered verbatim in HTML
+# emails. See finding F6 from the 2026-07-13 review.
+_jinja = Environment(loader=BaseLoader(), autoescape=True)
 
 BASE_HTML = """
 <!DOCTYPE html>
