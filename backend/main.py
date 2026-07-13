@@ -143,15 +143,18 @@ if _static_path and _static_path.is_dir() and (_static_path / "index.html").exis
 
     # Mount static assets (JS/CSS/images) — must come AFTER /api routes
     # but the path "/" doesn't shadow /api because FastAPI matches
-    # explicit routes before mounted sub-apps.
-    app.mount("/assets", StaticFiles(directory=str(_static_path / "assets")), name="spa-assets")
+    # explicit routes before mounted sub-apps. Guard against a missing
+    # assets/ dir (a build that didn't emit one) so the app still starts.
+    _assets_dir = _static_path / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="spa-assets")
 
     # Catch-all for client-side routes (login, tasks/:id, etc.).
     # Anything that's not /api/*, not a static file, and is a GET gets
     # index.html so React Router can take over. Non-GET and unknown
     # paths fall through to FastAPI's default 404/405.
     @app.get("/{full_path:path}")
-    async def spa_fallback(full_path: str, request: Request):
+    async def spa_fallback(full_path: str):
         # Defensive: never intercept API routes (shouldn't reach here
         # because /api routes are registered first, but double-check in
         # case a future router is added with a non-/api prefix).
@@ -160,9 +163,29 @@ if _static_path and _static_path.is_dir() and (_static_path / "index.html").exis
 
         # Try to serve a real static file first (favicon.ico, icon.svg,
         # robots.txt, etc. — anything Vite emitted at the dist root).
-        candidate = _static_path / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(str(candidate))
+        #
+        # CRITICAL — path traversal defense: Starlette normalizes raw
+        # `..` in URLs, but encoded forms (`%2e%2e`, `..%2f`) bypass
+        # that normalization and reach here as `full_path = "../..."`.
+        # Without this check, `_static_path / full_path` would resolve
+        # outside _static_path and FileResponse would serve arbitrary
+        # files (e.g. /etc/passwd, the JWT signing key on disk, etc.).
+        # Verified exploitable pre-fix — see
+        # /home/z/my-project/scripts/audit_traversal.py.
+        if full_path:
+            try:
+                candidate = (_static_path / full_path).resolve()
+            except (ValueError, OSError):
+                candidate = None
+            # is_relative_to() (Python 3.9+) returns True only if
+            # candidate is _static_path itself or inside it. Reject
+            # anything that escapes via `..`.
+            if (
+                candidate is not None
+                and candidate.is_file()
+                and candidate.is_relative_to(_static_path)
+            ):
+                return FileResponse(str(candidate))
 
         # Otherwise return index.html for React Router to handle.
         return FileResponse(str(_static_path / "index.html"))

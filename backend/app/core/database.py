@@ -30,13 +30,20 @@ except Exception as exc:
 # The app is async-first (FastAPI + aiosqlite + asyncpg); a sync driver
 # would deadlock on the first query. Warn (don't fail) so users who
 # intentionally want a sync driver for some reason can still proceed.
-if not _db_url.drivername.startswith(("aiosqlite", "asyncpg", "asyncmy")):
+#
+# SQLAlchemy's drivername is "<dialect>+<driver>" (e.g. "sqlite+aiosqlite",
+# "postgresql+asyncpg"). Check the DRIVER part (after the "+"), not the
+# whole string — otherwise "sqlite+aiosqlite" fails startswith("aiosqlite")
+# and the warning fires on every async SQLite startup. (F-R1)
+_async_drivers = {"aiosqlite", "asyncpg", "asyncmy"}
+_db_driver = _db_url.drivername.rsplit("+", 1)[-1]
+if _db_driver not in _async_drivers:
     import logging
     logging.getLogger(__name__).warning(
-        "DATABASE_URL driver %r is not async (expected aiosqlite, asyncpg, "
-        "or asyncmy). The app is async-first and may deadlock with a sync "
-        "driver. Continuing, but this is likely wrong.",
-        _db_url.drivername,
+        "DATABASE_URL driver %r is not async (expected one of %s). "
+        "The app is async-first and may deadlock with a sync driver. "
+        "Continuing, but this is likely wrong.",
+        _db_url.drivername, _async_drivers,
     )
 
 

@@ -23,7 +23,10 @@
 #   WHATSAPP_PROVIDER, WHATSAPP_FROM
 
 [build]
-  builder = "dockerfile"
+  # Schema enum: NIXPACKS | DOCKERFILE | RAILPACK | HEROKU | PAKETO.
+  # Use DOCKERFILE so Railway builds from the root Dockerfile (multi-stage:
+  # Node 20 builds frontend → Python 3.11 runtime bakes dist/ into /app/static).
+  builder = "DOCKERFILE"
   dockerfilePath = "Dockerfile"
 
 [deploy]
@@ -37,12 +40,16 @@
   # Migrations run BEFORE the service starts (Railway runs preDeployCommand
   # in a fresh container using the built image, then starts the main
   # container). `alembic upgrade head` is idempotent — safe on every deploy.
+  # The Dockerfile CMD ALSO runs it (belt-and-braces for local `docker run`
+  # and other hosts that don't have a preDeploy phase).
   preDeployCommand = "alembic upgrade head"
-
-# Persistent volume for SQLite (only used if DATABASE_URL points at
-# /app/data/task2sms.db — if you wire up the Railway Postgres plugin
-# instead, this volume is simply unused).
-# The mount path MUST match the SQLite path in DATABASE_URL.
-[[volume]]
-  name = "task2sms-data"
-  mountPath = "/app/data"
+  # Explicit start command — overrides the Dockerfile CMD. Reads $PORT
+  # (Railway injects it) with 8000 as fallback for local `docker run`.
+  startCommand = "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
+  # If using SQLite + a Railway volume (not the Postgres plugin), the
+  # volume MUST be mounted at /app/data — Railway will refuse to deploy
+  # if the mount is missing. Create the volume in the dashboard
+  # (Service → Settings → Volumes → Add Volume, mount path /app/data).
+  # If using the Postgres plugin instead, set DATABASE_URL to the plugin
+  # URL and remove this line (no volume needed).
+  requiredMountPath = "/app/data"
