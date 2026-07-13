@@ -16,9 +16,9 @@ async def test_register(client):
 
 
 async def test_register_duplicate_email(client):
-    payload = {"email": "dup@example.com", "username": "u1", "password": "pass1234"}
+    payload = {"email": "dup@example.com", "username": "u1user", "password": "pass1234"}
     await client.post("/api/auth/register", json=payload)
-    payload["username"] = "u2"
+    payload["username"] = "u2user"
     resp = await client.post("/api/auth/register", json=payload)
     assert resp.status_code == 400
 
@@ -36,10 +36,10 @@ async def test_login_success(client):
 
 async def test_login_wrong_password(client):
     await client.post("/api/auth/register", json={
-        "email": "wp@example.com", "username": "wpuser", "password": "correct"
+        "email": "wp@example.com", "username": "wpuser", "password": "correctpass"
     })
     resp = await client.post("/api/auth/login", json={
-        "username": "wpuser", "password": "wrong"
+        "username": "wpuser", "password": "wrongpass"
     })
     assert resp.status_code == 401
 

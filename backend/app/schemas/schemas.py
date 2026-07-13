@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Any
 from datetime import datetime
 from app.models.task import TaskStatus, ScheduleType
@@ -8,14 +8,14 @@ from app.models.notification import NotificationStatus
 # ── Auth ──────────────────────────────────────────────────────────────
 class UserCreate(BaseModel):
     email: EmailStr
-    username: str
-    password: str
-    full_name: Optional[str] = None
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=256)
+    full_name: Optional[str] = Field(default=None, max_length=255)
 
 
 class UserLogin(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
 
 
 class UserOut(BaseModel):
@@ -38,44 +38,48 @@ class Token(BaseModel):
 
 # ── Tasks ─────────────────────────────────────────────────────────────
 class TaskCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
+    name: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=2000)
     schedule_type: ScheduleType = ScheduleType.INTERVAL
-    cron_expression: Optional[str] = None
-    interval_value: Optional[int] = None
-    interval_unit: Optional[str] = None   # minutes | hours | days
+    cron_expression: Optional[str] = Field(default=None, max_length=100)
+    interval_value: Optional[int] = Field(default=None, ge=1, le=10_000_000)
+    interval_unit: Optional[str] = Field(default=None, max_length=10)   # minutes | hours | days
     run_at: Optional[datetime] = None
     condition_enabled: bool = False
-    condition_field: Optional[str] = None
-    condition_operator: Optional[str] = None
-    condition_value: Optional[str] = None
-    recipients: List[str]
-    message_template: str
-    sms_provider: Optional[str] = None
+    condition_field: Optional[str] = Field(default=None, max_length=100)
+    condition_operator: Optional[str] = Field(default=None, max_length=20)
+    condition_value: Optional[str] = Field(default=None, max_length=500)
+    recipients: List[str] = Field(min_length=1, max_length=1000)
+    message_template: str = Field(min_length=1, max_length=5000)
+    sms_provider: Optional[str] = Field(default=None, max_length=50)
 
     @field_validator("recipients")
     @classmethod
     def validate_recipients(cls, v):
         if not v:
             raise ValueError("At least one recipient is required")
+        # Cap each recipient length to protect against pathological inputs.
+        for r in v:
+            if not isinstance(r, str) or len(r) > 255:
+                raise ValueError("Each recipient must be a string of ≤255 chars")
         return v
 
 
 class TaskUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=2000)
     schedule_type: Optional[ScheduleType] = None
-    cron_expression: Optional[str] = None
-    interval_value: Optional[int] = None
-    interval_unit: Optional[str] = None
+    cron_expression: Optional[str] = Field(default=None, max_length=100)
+    interval_value: Optional[int] = Field(default=None, ge=1, le=10_000_000)
+    interval_unit: Optional[str] = Field(default=None, max_length=10)
     run_at: Optional[datetime] = None
     condition_enabled: Optional[bool] = None
-    condition_field: Optional[str] = None
-    condition_operator: Optional[str] = None
-    condition_value: Optional[str] = None
-    recipients: Optional[List[str]] = None
-    message_template: Optional[str] = None
-    sms_provider: Optional[str] = None
+    condition_field: Optional[str] = Field(default=None, max_length=100)
+    condition_operator: Optional[str] = Field(default=None, max_length=20)
+    condition_value: Optional[str] = Field(default=None, max_length=500)
+    recipients: Optional[List[str]] = Field(default=None, min_length=1, max_length=1000)
+    message_template: Optional[str] = Field(default=None, min_length=1, max_length=5000)
+    sms_provider: Optional[str] = Field(default=None, max_length=50)
     status: Optional[TaskStatus] = None
 
 
@@ -127,9 +131,9 @@ class NotificationOut(BaseModel):
 
 
 class SendSMSRequest(BaseModel):
-    recipients: List[str]
-    message: str
-    provider: Optional[str] = None
+    recipients: List[str] = Field(min_length=1, max_length=1000)
+    message: str = Field(min_length=1, max_length=5000)
+    provider: Optional[str] = Field(default=None, max_length=50)
 
 
 class PaginatedResponse(BaseModel):
