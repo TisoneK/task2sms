@@ -28,14 +28,43 @@ DEFAULT_UA = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
+# Allowlist of header keys users may set on outbound scraper requests.
+# Anything else is stripped: arbitrary Host / Authorization / Cookie /
+# X-Forwarded-* headers would let an authenticated user pivot through the
+# scraper into internal services (SSRF amplification). See finding F17
+# from the 2026-07-13 review.
+_ALLOWED_OUTBOUND_HEADERS = frozenset({
+    "accept",
+    "accept-charset",
+    "accept-datetime",
+    "accept-language",
+    "cache-control",
+    "dnt",
+    "pragma",
+    "range",
+    "referer",
+    "user-agent",
+    "x-requested-with",
+})
+
+
+def _filter_extra_headers(extra_headers: Optional[dict]) -> dict:
+    """Drop headers not in the allowlist. Case-insensitive on keys."""
+    if not extra_headers:
+        return {}
+    return {
+        k: v for k, v in extra_headers.items()
+        if isinstance(k, str) and k.lower() in _ALLOWED_OUTBOUND_HEADERS
+    }
+
+
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
 async def _fetch_static(url: str, user_agent: Optional[str] = None,
                          extra_headers: Optional[dict] = None,
                          timeout: int = 30) -> str:
     headers = {"User-Agent": user_agent or DEFAULT_UA}
-    if extra_headers:
-        headers.update(extra_headers)
+    headers.update(_filter_extra_headers(extra_headers))
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()

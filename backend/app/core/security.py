@@ -48,6 +48,9 @@ async def get_current_user(
 
     from app.services.user_service import get_user_by_id
     user = await get_user_by_id(db, int(user_id))
-    if user is None:
+    # Also reject deactivated users — otherwise a disabled account keeps
+    # full access until its 24h token expires. See finding F11 from the
+    # 2026-07-13 review.
+    if user is None or not getattr(user, "is_active", True):
         raise credentials_exception
     return user
