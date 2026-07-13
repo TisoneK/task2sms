@@ -11,13 +11,60 @@ from app.api.routes import (
     whatsapp, email_api, telegram_api, monitors, contacts, picker,
 )
 import logging
+import re
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# Insecure default values shipped in app/core/config.py. A production deploy
+# that forgets to override these would silently run with publicly-known
+# signing keys — an attacker could forge JWTs as any user (`{"sub": "1"}`)
+# and forge inbound webhook signatures. Refuse to start in non-DEBUG mode
+# if any of them are still set.
+_INSECURE_DEFAULTS = {
+    "SECRET_KEY": "dev-secret-key-change-in-production",
+    "WEBHOOK_SECRET": "change-me-webhook-secret",
+}
+
+# FRONTEND_URL is used as a CORS allow-origin with allow_credentials=True.
+# Validate it is a real http(s)://host[:port] URL so a misconfigured env
+# (e.g. empty string, wildcard, scheme-relative) doesn't quietly weaken CORS.
+_URL_RE = re.compile(r"^https?://[A-Za-z0-9.\-]+(:\d+)?(/.*)?$")
+
+
+def _validate_runtime_config() -> None:
+    """Fail fast on insecure defaults / malformed config in non-DEBUG mode."""
+    if settings.DEBUG:
+        # Dev mode: log a warning but don't block startup so local runs work.
+        for key, value in _INSECURE_DEFAULTS.items():
+            if getattr(settings, key) == value:
+                logger.warning(
+                    "Security: %s is still the insecure default — set it "
+                    "before deploying (DEBUG=True, continuing).", key,
+                )
+        return
+
+    bad = [k for k, v in _INSECURE_DEFAULTS.items() if getattr(settings, k) == v]
+    if bad:
+        raise RuntimeError(
+            f"Refusing to start: {', '.join(bad)} still set to insecure "
+            f"default. Set real values via env vars or .env before running "
+            f"in production (DEBUG=False)."
+        )
+
+    if not _URL_RE.match(settings.FRONTEND_URL):
+        raise RuntimeError(
+            f"Refusing to start: FRONTEND_URL={settings.FRONTEND_URL!r} is "
+            f"not a valid http(s)://host[:port] URL. It is used as the CORS "
+            f"allow-origin with allow_credentials=True, so a malformed value "
+            f"weakens CORS."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _validate_runtime_config()
     logger.info("Starting Task2SMS...")
     await create_tables()
     await start_scheduler()
