@@ -1,23 +1,30 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
 import useAuthStore from './store/authStore'
 import Layout from './components/ui/Layout'
 import ErrorBoundary from './components/ui/ErrorBoundary'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
-import DashboardPage from './pages/DashboardPage'
-import TasksPage from './pages/TasksPage'
-import TaskFormPage from './pages/TaskFormPage'
-import NotificationsPage from './pages/NotificationsPage'
-import SendSMSPage from './pages/SendSMSPage'
-import AnalyticsPage from './pages/AnalyticsPage'
-import OrganizationsPage from './pages/OrganizationsPage'
-import WebhooksPage from './pages/WebhooksPage'
-import DataSourcesPage from './pages/DataSourcesPage'
-import WhatsAppPage from './pages/WhatsAppPage'
-import EmailPage from './pages/EmailPage'
-import TelegramPage from './pages/TelegramPage'
-import ScraperPage from './pages/ScraperPage'
-import SettingsPage from './pages/SettingsPage'
+
+// Code-split every authenticated page so the initial bundle only contains
+// the shell (Layout) + auth pages. Each page becomes its own chunk loaded
+// on first navigation. ScraperPage alone is ~2.6k lines — without this,
+// a user who only sends SMS still downloads the scraper bundle.
+// Finding F-H2 from the 2026-07-13 review.
+const DashboardPage     = lazy(() => import('./pages/DashboardPage'))
+const AnalyticsPage     = lazy(() => import('./pages/AnalyticsPage'))
+const TasksPage         = lazy(() => import('./pages/TasksPage'))
+const TaskFormPage      = lazy(() => import('./pages/TaskFormPage'))
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'))
+const SendSMSPage       = lazy(() => import('./pages/SendSMSPage'))
+const WhatsAppPage      = lazy(() => import('./pages/WhatsAppPage'))
+const TelegramPage      = lazy(() => import('./pages/TelegramPage'))
+const EmailPage         = lazy(() => import('./pages/EmailPage'))
+const DataSourcesPage   = lazy(() => import('./pages/DataSourcesPage'))
+const ScraperPage       = lazy(() => import('./pages/ScraperPage'))
+const WebhooksPage      = lazy(() => import('./pages/WebhooksPage'))
+const OrganizationsPage = lazy(() => import('./pages/OrganizationsPage'))
+const SettingsPage      = lazy(() => import('./pages/SettingsPage'))
 
 function PrivateRoute({ children }) {
   const token = useAuthStore((s) => s.token)
@@ -25,7 +32,13 @@ function PrivateRoute({ children }) {
 }
 
 function P({ component: Component }) {
-  return <ErrorBoundary><Component /></ErrorBoundary>
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<div className="p-8 text-sm" style={{ color: 'var(--muted-foreground)' }}>Loading…</div>}>
+        <Component />
+      </Suspense>
+    </ErrorBoundary>
+  )
 }
 
 export default function App() {
