@@ -13,6 +13,15 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./task2sms.db"
 
+    # --- Single-service deployment (Railway / any container host) ---
+    # When set, the backend serves the built SPA from this directory and
+    # falls back to index.html for client-side routes. Empty in dev (the
+    # Vite dev server on :5173 handles the frontend separately).
+    STATIC_DIR: str = ""
+    # Port the HTTP server listens on. Railway injects $PORT; default 8000
+    # keeps `uvicorn main:app` working unchanged for local dev.
+    PORT: int = 8000
+
     # Africa's Talking
     AT_USERNAME: str = "sandbox"
     AT_API_KEY: str = ""

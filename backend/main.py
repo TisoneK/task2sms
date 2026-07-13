@@ -1,6 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
+from pathlib import Path
 from app.core.config import settings
 from app.core.database import create_tables
 from app.workers.scheduler import start_scheduler, stop_scheduler
@@ -110,3 +113,63 @@ for router in ROUTERS:
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": settings.APP_VERSION}
+
+
+# --- Single-service SPA serving (Railway / container host) ---
+# When STATIC_DIR points at a built frontend (e.g. /app/static in the
+# Railway image), mount it as static assets and add a catch-all that
+# returns index.html for any non-API GET — so client-side routes like
+# /login and /tasks/123 work on deep links and refreshes.
+#
+# Order is load-bearing: the /api/* routers above are registered first,
+# so FastAPI matches them before this catch-all. StaticFiles is mounted
+# at "/" with html=True so it serves /index.html for "/" and resolves
+# hashed asset paths (/assets/index-<hash>.js) directly; the catch-all
+# only fires for paths StaticFiles can't resolve (client-side routes).
+#
+# In dev, STATIC_DIR is empty — Vite serves the frontend on :5173 and
+# proxies /api to :8000 via vite.config.js. Nothing changes.
+_static_path = Path(settings.STATIC_DIR).resolve() if settings.STATIC_DIR else None
+if _static_path and _static_path.is_dir() and (_static_path / "index.html").exists():
+    # Security headers normally applied by the old nginx.conf — moved
+    # here so the single-service deploy keeps them without nginx.
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+    # Mount static assets (JS/CSS/images) — must come AFTER /api routes
+    # but the path "/" doesn't shadow /api because FastAPI matches
+    # explicit routes before mounted sub-apps.
+    app.mount("/assets", StaticFiles(directory=str(_static_path / "assets")), name="spa-assets")
+
+    # Catch-all for client-side routes (login, tasks/:id, etc.).
+    # Anything that's not /api/*, not a static file, and is a GET gets
+    # index.html so React Router can take over. Non-GET and unknown
+    # paths fall through to FastAPI's default 404/405.
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str, request: Request):
+        # Defensive: never intercept API routes (shouldn't reach here
+        # because /api routes are registered first, but double-check in
+        # case a future router is added with a non-/api prefix).
+        if full_path.startswith("api/") or full_path == "api":
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+
+        # Try to serve a real static file first (favicon.ico, icon.svg,
+        # robots.txt, etc. — anything Vite emitted at the dist root).
+        candidate = _static_path / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(str(candidate))
+
+        # Otherwise return index.html for React Router to handle.
+        return FileResponse(str(_static_path / "index.html"))
+
+    logger.info("Serving built SPA from %s (single-service mode)", _static_path)
+else:
+    logger.info(
+        "STATIC_DIR=%r — not serving a built SPA; frontend runs separately (dev mode).",
+        settings.STATIC_DIR,
+    )
