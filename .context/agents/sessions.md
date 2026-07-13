@@ -7,7 +7,7 @@ past entries — append corrections instead.
 ## 2026-07-13 — Session 1
 - **Agent:** Super Z | **Model:** unknown (system prompt states GLM family but no exact version ID) | **Platform:** Z.ai cloud sandbox (Debian 13 trixie, Node 24.18, Python 3.12.13) | **Role:** engineer
 - **Task:** Bootstrap `.context/` from skeleton and execute the universal kickoff protocol end-to-end for the Task2SMS project (general sweep: discovery + review + fix all safe issues).
-- **Commits:** 16 (`de39313..<TBD>`) — 1 bootstrap + 12 fixes + 1 review report + 1 `.context/` log update + 1 F27 follow-up fix + 1 `.context/` follow-up update (this commit).
+- **Commits:** 16 (`de39313..1e1afda`) — 1 bootstrap + 12 fixes + 1 review report + 1 `.context/` log update + 1 F27 follow-up fix + 1 `.context/` follow-up update (this commit).
 - **Outcome:** done — 18 safe findings fixed and pushed (17 in the initial pass + F27 in the follow-up); 34 open items appended to `tasks/backlog.md`; review report at `.context/reviews/2026-07-13-review.md`. Backend pytest 46/46 green throughout; frontend `npm run build` succeeds with no warnings.
 - **Open items:** 34 items in `tasks/backlog.md` — grouped by severity. Top 3 (Critical, need design discussion before implementation): F1 (`eval()` RCE on monitor expressions), F2 (no SSRF protection on 4 outbound HTTP paths), F-C1 (JWT in `localStorage` — needs httpOnly cookie + CSP).
 - **Report:** .context/reviews/2026-07-13-review.md
