@@ -45,3 +45,6 @@ correction twice.
 ## Risk & approvals
 - Schema/migration changes (Alembic) need explicit user approval before commit (pre-flight — inferred from "flag architectural changes")
 - Secret/credential handling: never write to files; use `.context/secrets/` (gitignored) for local-only values (protocol rule)
+- Backend is async-first (FastAPI + aiosqlite + aiosmtplib) — keep new I/O async (approved pattern, 2026-07-13, observed in codebase)
+- Conventional Commits with scope; `chore(context):` for `.context/` edits; `docs(review):` for review reports (approved pattern, 2026-07-13, observed in git log + protocol rule)
+- Security fixes bundled by concern (e.g. all dependency bumps + Jinja2 autoescape in one commit) is acceptable; unrelated concerns split into separate commits (approved pattern, 2026-07-13, observed in protocol §Step 11 examples)
