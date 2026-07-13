@@ -84,7 +84,7 @@ export default function TaskFormPage() {
   return (
     <div className="max-w-2xl mx-auto space-y-5 animate-fade-in">
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate('/tasks')} className="btn-ghost p-2">
+        <button onClick={() => navigate('/tasks')} type="button" aria-label="Back to tasks" className="btn-ghost p-2">
           <ChevronLeft size={18} />
         </button>
         <div>
@@ -194,7 +194,7 @@ export default function TaskFormPage() {
               <input className="input flex-1" value={r} onChange={e => setRecipient(i, e.target.value)}
                 placeholder="+254712345678" type="tel" />
               {form.recipients.length > 1 && (
-                <button type="button" onClick={() => removeRecipient(i)}
+                <button type="button" onClick={() => removeRecipient(i)} aria-label={`Remove recipient ${i + 1}`}
                   className="btn-ghost p-2" style={{ color: 'var(--destructive)' }}>
                   <X size={15} />
                 </button>

@@ -172,7 +172,7 @@ export default function SendSMSPage() {
                 type="tel"
               />
               {recipients.length > 1 && (
-                <button type="button" onClick={() => removeRecipient(i)}
+                <button type="button" onClick={() => removeRecipient(i)} aria-label={`Remove recipient ${i + 1}`}
                   className="btn-ghost p-2 text-red-400 hover:text-red-600 hover:bg-red-50">
                   <X size={16} />
                 </button>

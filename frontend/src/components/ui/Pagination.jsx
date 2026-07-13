@@ -22,6 +22,7 @@ export default function Pagination({ page, total, perPage, onChange }) {
       </p>
       <div className="flex items-center gap-1">
         <button onClick={() => onChange(page - 1)} disabled={page === 1}
+          aria-label="Previous page"
           className="btn-ghost p-1.5" style={{ borderRadius: '0.375rem' }}>
           <ChevronLeft size={15} />
         </button>
@@ -30,7 +31,8 @@ export default function Pagination({ page, total, perPage, onChange }) {
             <span key={`ellipsis-${i}`} className="w-8 text-center text-sm"
                   style={{ color: 'var(--muted-foreground)' }}>…</span>
           ) : (
-            <button key={p} onClick={() => onChange(p)}
+            <button key={p} onClick={() => onChange(p)} aria-current={p === page ? 'page' : undefined}
+              aria-label={`Page ${p}`}
               className="w-8 h-8 rounded-lg text-sm font-medium transition-colors"
               style={{
                 background: p === page ? 'var(--primary)' : 'transparent',
@@ -41,6 +43,7 @@ export default function Pagination({ page, total, perPage, onChange }) {
           )
         )}
         <button onClick={() => onChange(page + 1)} disabled={page === pages}
+          aria-label="Next page"
           className="btn-ghost p-1.5" style={{ borderRadius: '0.375rem' }}>
           <ChevronRight size={15} />
         </button>

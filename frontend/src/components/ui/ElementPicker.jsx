@@ -255,7 +255,7 @@ export default function ElementPicker({ url, onSelect, onClose }) {
             className="btn-ghost p-1.5" title="Reload / reconnect">
             <RefreshCw size={14} className={phase === 'loading' ? 'animate-spin' : ''} />
           </button>
-          <button onClick={() => { wsRef.current?.close(); onClose() }} className="btn-ghost p-1.5">
+          <button onClick={() => { wsRef.current?.close(); onClose() }} type="button" aria-label="Close element picker" className="btn-ghost p-1.5">
             <X size={16} />
           </button>
         </div>

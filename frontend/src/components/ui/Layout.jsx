@@ -112,7 +112,7 @@ export default function Layout() {
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                  onClick={() => setMobileOpen(false)} />
             <aside className="relative z-50 flex flex-col w-[216px] h-full shadow-xl">
-              <button onClick={() => setMobileOpen(false)}
+              <button onClick={() => setMobileOpen(false)} type="button" aria-label="Close menu"
                 className="absolute top-3 right-3 z-10 w-7 h-7 rounded-full flex items-center
                            justify-center text-white hover:bg-white/10 transition-colors">
                 <X size={14} />
@@ -127,7 +127,7 @@ export default function Layout() {
           {/* Mobile top bar */}
           <header className="md:hidden flex items-center gap-3 px-4 py-3 shrink-0"
                   style={{ background: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
-            <button onClick={() => setMobileOpen(true)}
+            <button onClick={() => setMobileOpen(true)} type="button" aria-label="Open menu"
               className="p-1.5 rounded-lg" style={{ color: 'var(--muted-foreground)' }}>
               <Menu size={20} />
             </button>

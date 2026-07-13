@@ -80,7 +80,7 @@ export default function WhatsAppPage() {
                 <input className="input flex-1" value={r} onChange={e => setRecipient(i, e.target.value)}
                   placeholder="+254712345678" type="tel" />
                 {recipients.length > 1 && (
-                  <button type="button" onClick={() => removeRecipient(i)} className="p-2 rounded-lg transition-colors" style={{ color: 'var(--muted-foreground)' }} onMouseEnter={(e) => e.target.style.backgroundColor = 'var(--muted)'} onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}>
+                  <button type="button" onClick={() => removeRecipient(i)} aria-label={`Remove recipient ${i + 1}`} className="p-2 rounded-lg transition-colors" style={{ color: 'var(--muted-foreground)' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--muted)'} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
                     <X size={16} />
                   </button>
                 )}

@@ -50,7 +50,7 @@ function DSModal({ onClose, onSave, initial }) {
           <h3 className="font-semibold text-[15px]" style={{ color:'var(--foreground)' }}>
             {initial ? 'Edit Data Source' : 'New Data Source'}
           </h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X size={16} /></button>
+          <button onClick={onClose} type="button" aria-label="Close dialog" className="btn-ghost p-1.5"><X size={16} /></button>
         </div>
         <form onSubmit={submit} className="p-6 space-y-4">
           <div><label className="label">Name</label>
@@ -198,7 +198,10 @@ export default function DataSourcesPage() {
                     {fetching === ds.id ? <div className="spinner-sm" /> : <Play size={14} />}
                   </button>
                   {ds.last_result && (
-                    <button onClick={() => setExpanded(expanded === ds.id ? null : ds.id)} className="btn-ghost p-2">
+                    <button onClick={() => setExpanded(expanded === ds.id ? null : ds.id)}
+                      aria-label={expanded === ds.id ? `Collapse details for ${ds.name}` : `Expand details for ${ds.name}`}
+                      aria-expanded={expanded === ds.id}
+                      className="btn-ghost p-2">
                       {expanded === ds.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                     </button>
                   )}

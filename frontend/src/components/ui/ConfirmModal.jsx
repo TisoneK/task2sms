@@ -18,7 +18,8 @@ export default function ConfirmModal({ open, title, message, onConfirm, onCancel
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
          style={{ background: 'rgba(0,0,0,0.55)' }}
          onClick={onCancel}>
-      <div className="relative rounded-2xl w-full max-w-sm p-6 space-y-4 animate-fade-in"
+      <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-modal-title"
+           className="relative rounded-2xl w-full max-w-sm p-6 space-y-4 animate-fade-in"
            onClick={e => e.stopPropagation()}
            style={{ background: 'var(--card)', boxShadow: 'var(--shadow-modal)',
                     border: '1px solid var(--border)' }}>
@@ -27,7 +28,7 @@ export default function ConfirmModal({ open, title, message, onConfirm, onCancel
           <AlertTriangle size={20} style={{ color: danger ? '#dc2626' : '#d97706' }} />
         </div>
         <div className="text-center">
-          <h3 className="font-semibold" style={{ color: 'var(--foreground)' }}>{title}</h3>
+          <h3 id="confirm-modal-title" className="font-semibold" style={{ color: 'var(--foreground)' }}>{title}</h3>
           {message && <p className="text-sm mt-1" style={{ color: 'var(--muted-foreground)' }}>{message}</p>}
         </div>
         <div className="flex gap-3">

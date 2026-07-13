@@ -26,6 +26,9 @@ export default function Modal({ open, onClose, title, children, maxWidth = 'max-
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? 'modal-title' : undefined}
         className={`relative w-full ${maxWidth} max-h-[90vh] overflow-y-auto scrollbar-thin
                     rounded-2xl animate-fade-in`}
         style={{
@@ -38,8 +41,8 @@ export default function Modal({ open, onClose, title, children, maxWidth = 'max-
         {title && (
           <div className="flex items-center justify-between px-6 py-4 sticky top-0 z-10"
                style={{ background: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
-            <h3 className="font-semibold text-[15px]" style={{ color: 'var(--foreground)' }}>{title}</h3>
-            <button onClick={onClose}
+            <h3 id="modal-title" className="font-semibold text-[15px]" style={{ color: 'var(--foreground)' }}>{title}</h3>
+            <button onClick={onClose} type="button" aria-label="Close dialog"
               className="p-1.5 rounded-lg transition-colors"
               style={{ color: 'var(--muted-foreground)' }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--muted)'}
