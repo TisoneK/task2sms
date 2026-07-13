@@ -37,3 +37,19 @@ if literally nothing slowed you down.
 - **Cause:** The new schema constraint was correct (aligns with the existing `/api/settings/change-password` endpoint's 8-char minimum), but the tests had been written with short placeholder strings that violated the new policy.
 - **Workaround / fix:** Updated `tests/test_auth.py` fixtures to use 8+ char passwords (`"correctpass"`, `"wrongpass"`, `"u1user"`, `"u2user"`). Test intent unchanged.
 - **Prevent next time:** When tightening input validation, grep the test suite for the affected fields before pushing — fixture strings often use short placeholders that don't satisfy stricter limits.
+
+---
+## 2026-07-13 — Super Z / glm-5.2 (Session 2)
+- **Problem:** Could not run `docker build` to verify the new root Dockerfile for Railway hosting. Sandbox has no Docker installed (already documented in `system/environments.md` from Session 1).
+- **Cost:** ~10 minutes of static review + writing a `TestClient`-based smoke test as a workaround. Lower confidence in the Dockerfile than if I could have built it.
+- **Cause:** Z.ai cloud sandbox doesn't ship Docker — only Python/Node/Bun runtimes. This is a platform limitation, not a project issue.
+- **Workaround / fix:** (1) Static review of the Dockerfile (layer order, COPY paths, ENV vars, CMD). (2) Wrote `/home/z/my-project/scripts/test_spa_serving.py` — a `TestClient`-based smoke test that validates the FastAPI SPA-serving logic (route precedence, catch-all, security headers, `/api/unknown` 404) without needing a container. (3) Verified `npm run build` produces `dist/index.html` + `dist/assets/` matching what the Dockerfile stage 1 emits. The user should run `docker build -t task2sms .` locally before the first Railway deploy to catch any layer-cache or apt-package issues.
+- **Prevent next time:** Already documented in `system/environments.md`. Future sessions on this sandbox: assume Docker is unavailable and plan verification around `TestClient` + `npm run build` + static review. If a feature absolutely requires a Docker build to verify, flag it in the chat summary and ask the user to build locally.
+
+---
+## 2026-07-13 — Super Z / glm-5.2 (Session 2)
+- **Problem:** Could not push commits to `origin/main` — cloud/sandbox pushes need a GitHub PAT (already documented from Session 1), and the user did not provide one this session. 4 commits are stuck locally.
+- **Cost:** The feature is "done" locally but not delivered to remote. The next session (or the user) will need to push.
+- **Cause:** Session 1's pattern was: user provides PAT in chat → agent exports `GIT_TOKEN` → agent pushes → agent strips token. Session 2's user message was a feature request without a PAT, and per Pitfall #30 I chose not to ask for one (pushing is protocol-prescribed; the blocker is a missing credential, not ambiguity).
+- **Workaround / fix:** Surfaced the pending push in the chat summary + review report + `tasks/current.md`. The 4 commits (`2f3713f`, `f82b8b3`, `76987e2`, plus the `.context/` log commit) are ready to push. The user can either push from their local clone, or provide a PAT in a follow-up message and I'll push.
+- **Prevent next time:** None at the project level — this is a sandbox workflow pattern. Future sessions: if no PAT is provided and pushes are needed, surface it once in the chat summary (don't ask permission — just report the blocker) and move on.

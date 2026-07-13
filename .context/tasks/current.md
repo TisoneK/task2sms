@@ -5,6 +5,7 @@ session start (protocol Step 3), clear it at session end (Step 15). If
 you find a stale in-progress entry here, a prior session died mid-task —
 check its session entry and backlog before starting.
 
-- **Session:** 2026-07-13 — Super Z / unknown (GLM family)
-- **Task:** General sweep — discovery + review + fix all safe issues across the Task2SMS codebase (backend FastAPI app + React frontend + Docker config). First session on this repo: bootstrap `.context/`, then execute the 19-step protocol end-to-end.
-- **Status:** done — session complete; all 12 commits pushed (de39313..f46aa65); 17 open items appended to `tasks/backlog.md`; report at `.context/reviews/2026-07-13-review.md`.
+- **Session:** 2026-07-13 — Super Z / glm-5.2 — Z.ai cloud sandbox
+- **Task:** `feature: add Railway hosting support` — host frontend + backend on a **single Railway service**.
+- **Status:** done locally — 3 commits + 1 `.context/` log commit. **Pending push** — cloud/sandbox pushes need a PAT; the user did not provide one this session. Commits `2f3713f`, `f82b8b3`, `76987e2` (and the `.context/` log commit) are ready to push.
+- **Report:** `.context/reviews/2026-07-13-railway-review.md`

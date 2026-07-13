@@ -27,3 +27,19 @@ past entries — append corrections instead.
 - **Correction:** Session 1's entry above recorded the model as `unknown` because the agent's system prompt states "built on the GLM model" without an exact version ID, and the protocol rule says "never fabricate a version number." After the session ended, the user stated in chat: "You are GLM-5.2." Per the protocol's precedence rules (user statement in chat = highest authority, above system-prompt inference), the model is now recorded as `glm-5.2` in `system/ai-models.md` (updated in place). This correction is appended here rather than editing the original entry, per the append-only rule.
 - **Commits:** this correction will be committed and pushed with the next PAT-bearing turn.
 - **Outcome:** correction logged.
+
+---
+## 2026-07-13 — Session 2
+- **Agent:** Super Z | **Model:** glm-5.2 | **Platform:** Z.ai cloud sandbox (Debian 13 trixie, Node 24.18, Python 3.12.13) | **Role:** engineer
+- **Task:** `feature: add Railway hosting support` — host frontend + backend on a **single Railway service**. Chat-message target overrode the kickoff's default "general sweep."
+- **Commits:** 3 local (`2f3713f` backend SPA serving, `f82b8b3` Railway hosting config, `76987e2` README section) + 1 `.context/` log commit. **Not pushed** — cloud/sandbox pushes need a PAT and the user didn't provide one this session.
+- **Outcome:** feature complete locally. One Railway service, one container, one port. FastAPI serves both `/api/*` (API) and `/*` (built React SPA) via a `STATIC_DIR`-gated mount + catch-all route in `main.py`. Multi-stage root `Dockerfile` (node:20-alpine builds frontend → python:3.11-slim runtime bakes `dist/` into `/app/static`). `railway.toml` wires healthcheck (`/api/health`), `preDeployCommand = "alembic upgrade head"`, and a `/app/data` volume for SQLite. Existing `docker-compose.yml` + per-service Dockerfiles left intact — both deployment paths maintained.
+- **Verified:** backend pytest 46/46 still pass; new SPA-serving smoke test (7 cases) passes; frontend `npm run build` succeeds. Dockerfile not built (sandbox has no Docker — static review only).
+- **Open items:** 4 new backlog items (F-R1: pre-existing async-driver false-positive warning in `database.py`; F-R2: add Brotli/gzip middleware; F-R3: verify `playwright install-deps` in single-service Dockerfile; F-R4: add CI workflow to build root Dockerfile on every PR). F10 (remove `create_tables()` from lifespan) explicitly deferred — Railway runs `alembic upgrade head` AND `create_tables()` as belt-and-braces; F10's full removal is a separate decision.
+- **Report:** `.context/reviews/2026-07-13-railway-review.md`
+- **Notes:**
+  - User called out at session start that I had read the kickoff file but skipped the `.context/` protocol bootstrap (Step 0–3). I acknowledged and restarted properly — read all `.context/` memory files before writing any code. The protocol file itself (`ai-engineering-protocol.md`) was unreachable (private package repo, no PAT this session); proceeded using the protocol's structure as reconstructed from `.context/workflows/active.md`, `.context/README.md`, and `.context/SYNC.md`. This is a workaround, not literal compliance — logged as a flaw.
+  - Sandbox has no Docker — could not run `docker build` to verify the root Dockerfile. Static review only. The user should run `docker build -t task2sms .` locally before the first Railway deploy.
+  - Did NOT ask the user for a PAT (per Pitfall #30 — pushing is the protocol-prescribed next step; the blocker is a missing credential, not ambiguity). Surfaced the pending push in the chat summary instead.
+  - Reused model identity `glm-5.2` from Session 1's correction (no need to re-ask).
+
