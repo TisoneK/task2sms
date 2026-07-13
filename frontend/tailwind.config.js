@@ -1,6 +1,13 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  // The app toggles theme via <html data-theme="dark"> (see src/store/themeStore.js).
+  // Without this config, Tailwind defaults to `media` (OS prefers-color-scheme),
+  // so any `dark:` variant in components responded to the OS theme, not the
+  // manual toggle — making those variants appear broken. Pin darkMode to the
+  // [data-theme="dark"] selector so `dark:` variants align with the toggle.
+  // Finding F-H6 from the 2026-07-13 review.
+  darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     extend: {
       fontFamily: {

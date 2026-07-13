@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { monitorsApi } from '../services/api'
+import { monitorsApi, contactsApi } from '../services/api'
 import {
   Plus, Trash2, Play, Globe, X, ChevronDown, ChevronUp,
   AlertCircle, CheckCircle2, Clock, Pause, Copy, Tag,
@@ -599,9 +599,7 @@ function MonitorModal({ onClose, onSave, initial }) {
   }, [])
 
   useEffect(() => {
-    import('../services/api').then(({ contactsApi }) => {
-      contactsApi.list().then(r => setContacts(r.data)).catch(() => {})
-    })
+    contactsApi.list().then(r => setContacts(r.data)).catch(() => {})
   }, [])
 
   // Persist draft on change
@@ -630,7 +628,6 @@ function MonitorModal({ onClose, onSave, initial }) {
     if (!form.url || !form.selector) return
     setTesting(true); setTestResult(null)
     try {
-      const { monitorsApi } = await import('../services/api')
       const { data } = await monitorsApi.testSelector({
         url: form.url,
         selector_type: form.selector_type,
@@ -698,7 +695,6 @@ function MonitorModal({ onClose, onSave, initial }) {
     if (!validFields.length || !form.url) return
     setMultiTesting(true); setMultiTestResult(null)
     try {
-      const { monitorsApi } = await import('../services/api')
       const { data } = await monitorsApi.testMultiFields({
         url: form.url,
         use_playwright: form.use_playwright,
@@ -720,7 +716,6 @@ function MonitorModal({ onClose, onSave, initial }) {
     if (!field.name.trim() || !field.selector.trim() || !form.url) return
     
     try {
-      const { monitorsApi } = await import('../services/api')
       const { data } = await monitorsApi.testMultiFields({
         url: form.url,
         use_playwright: form.use_playwright,
