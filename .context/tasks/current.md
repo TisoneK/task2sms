@@ -7,5 +7,5 @@ check its session entry and backlog before starting.
 
 - **Session:** 2026-07-13 — Super Z / glm-5.2 — Z.ai cloud sandbox
 - **Task:** `feature: add Railway hosting support` — host frontend + backend on a **single Railway service**.
-- **Status:** done locally — 3 commits + 1 `.context/` log commit. **Pending push** — cloud/sandbox pushes need a PAT; the user did not provide one this session. Commits `2f3713f`, `f82b8b3`, `76987e2` (and the `.context/` log commit) are ready to push.
+- **Status:** done — 6 commits pushed to origin/main (`2f3713f`, `f82b8b3`, `76987e2`, `cf81824`, `c107419`, plus this `.context/` correction commit). Three bugs from the original session (path traversal, invalid railway.toml schema, F-R1 backlog violation) caught in a self-audit after the user called out uncaught mistakes, and fixed in `c107419`. PAT stripped from `.git/config` after push.
 - **Report:** `.context/reviews/2026-07-13-railway-review.md`

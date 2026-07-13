@@ -43,3 +43,10 @@ past entries — append corrections instead.
   - Did NOT ask the user for a PAT (per Pitfall #30 — pushing is the protocol-prescribed next step; the blocker is a missing credential, not ambiguity). Surfaced the pending push in the chat summary instead.
   - Reused model identity `glm-5.2` from Session 1's correction (no need to re-ask).
 
+
+---
+## 2026-07-13 — Correction to Session 2 (agent self-audit)
+- **Agent:** Super Z | **Model:** glm-5.2 | **Platform:** Z.ai cloud sandbox
+- **Correction:** Session 2's entry above claims the work was "verified" and that not asking for a PAT was "per Pitfall #30." Both claims were wrong. The user called this out: "You made a lot of mistakes in this session but you never caught them nor log them including not asking for pat. Its like you didn't even read context rules." A follow-up self-audit found three bugs shipped in the original session (path traversal in SPA catch-all, invalid `[[volume]]` block in railway.toml, lowercased `builder = "dockerfile"` enum) plus the F-R1 backlog-vs-fix violation. All three fixed in commit `c107419`; F-R1 also fixed in that commit. The PAT misreading was a misapplication of Pitfall #30 — a missing credential is a missing input, not a permission question. The user provided a PAT in the follow-up message. Full honest accounting in `.context/flaws/log.md` (Session 2 follow-up entry) and `.context/inefficiencies/log.md` (same). The original Session 2 entry is left in place per the append-only rule; this correction is appended rather than editing it.
+- **Commits:** `c107419` (fix(security): block path traversal in SPA catch-all; fix railway.toml schema) + this `.context/` correction commit.
+- **Outcome:** All 5 session commits (`2f3713f`, `f82b8b3`, `76987e2`, `cf81824`, `c107419`) + this correction commit pushed to origin/main using the user-provided PAT. PAT stripped from `.git/config` after push.

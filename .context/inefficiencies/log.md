@@ -53,3 +53,19 @@ if literally nothing slowed you down.
 - **Cause:** Session 1's pattern was: user provides PAT in chat → agent exports `GIT_TOKEN` → agent pushes → agent strips token. Session 2's user message was a feature request without a PAT, and per Pitfall #30 I chose not to ask for one (pushing is protocol-prescribed; the blocker is a missing credential, not ambiguity).
 - **Workaround / fix:** Surfaced the pending push in the chat summary + review report + `tasks/current.md`. The 4 commits (`2f3713f`, `f82b8b3`, `76987e2`, plus the `.context/` log commit) are ready to push. The user can either push from their local clone, or provide a PAT in a follow-up message and I'll push.
 - **Prevent next time:** None at the project level — this is a sandbox workflow pattern. Future sessions: if no PAT is provided and pushes are needed, surface it once in the chat summary (don't ask permission — just report the blocker) and move on.
+
+---
+## 2026-07-13 — Super Z / glm-5.2 (Session 2, follow-up — agent self-audit)
+- **Problem:** The agent shipped three bugs in Session 2 (path traversal in SPA catch-all, invalid `[[volume]]` block in railway.toml, lowercased `builder = "dockerfile"` enum) that it should have caught with basic testing/validation before commit. The user had to call them out.
+- **Cost:** One extra commit cycle (`c107419`) to fix all three, plus the reputational cost of the user losing trust in the agent's work. The path traversal was a CRITICAL security bug shipped to a public repo (would have been pushed if the user hadn't intervened).
+- **Cause:** The agent moved too fast. It wrote the SPA catch-all, noticed the unsafe pattern mentally, and shipped without a traversal test. It wrote `railway.toml` from memory without fetching the schema. It noticed F-R1 during testing and backlogged it instead of fixing it on the spot. In each case the agent had the information needed to catch the bug; it chose not to act on it.
+- **Workaround / fix:** Commit `c107419` fixes all three. The traversal audit script (`/home/z/my-project/scripts/audit_traversal.py`) and the schema validation (`/tmp/railway.schema.json` + `jsonschema.validate`) are now part of the verification flow. Future sessions should: (1) write a traversal test for ANY route that joins user input to a filesystem path, (2) validate IaC files against their official schemas before commit, (3) fix safe one-liners on the spot.
+- **Prevent next time:** The flaws/log.md entry for this session adds four new suggested pitfalls to the protocol package covering these patterns. The agent should re-read them before any session that involves (a) filesystem path handling, (b) infrastructure-as-code, or (c) a "should I fix or log?" decision.
+
+---
+## 2026-07-13 — Super Z / glm-5.2 (Session 2, follow-up — agent self-audit)
+- **Problem:** The agent did not ask for a PAT in Session 2, then mislogged the reason as "per Pitfall #30, don't ask permission." This left 4 commits unpushed. The user had to provide the PAT in a follow-up message and explicitly point out the misreading.
+- **Cost:** One extra round-trip with the user. The feature was "done locally" but not delivered. The user's frustration is the larger cost.
+- **Cause:** The agent conflated "don't ask permission for prescribed actions" with "don't ask the user for anything." A credential is a missing INPUT, not a permission question. The protocol assumes the agent has what it needs; when it doesn't, asking is correct.
+- **Workaround / fix:** PAT provided by user in follow-up message. Agent set up the remote with the token, will push, will strip the token from `.git/config` after, will unset `GIT_TOKEN` at session end.
+- **Prevent next time:** The flaws/log.md entry adds a new suggested pitfall: "A missing credential is a missing input, not a permission question. ASK for it."
