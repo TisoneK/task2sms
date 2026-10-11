@@ -75,8 +75,40 @@ def evaluate_condition(task: Task, context: Optional[Dict[str, Any]] = None) -> 
         return ops.get(task.condition_operator, True)
 
 
+async def build_task_context(db: AsyncSession, task: Task) -> Optional[Dict[str, Any]]:
+    """Fetch the task's data source (if any) into a context dict.
+
+    Returns the source's JSON object so ``evaluate_condition`` and the message
+    template can read its fields. Returns ``None`` when the task has no data
+    source, and ``{}`` when the fetch fails or the result is not an object — a
+    failed fetch must not crash a scheduled run, and a non-dict result has no
+    named fields to key off.
+    """
+    ds_id = getattr(task, "data_source_id", None)
+    if not ds_id:
+        return None
+    # Imported lazily to avoid a circular import (datasource_service imports models).
+    from app.services.integrations.datasource_service import (
+        fetch_datasource,
+        get_datasource,
+    )
+
+    ds = await get_datasource(db, ds_id, task.user_id)
+    if ds is None:
+        logger.warning(f"Task {task.id}: data source {ds_id} not found for user")
+        return {}
+    try:
+        data = await fetch_datasource(db, ds)
+    except Exception as e:  # noqa: BLE001 — a bad fetch must not kill the run
+        logger.error(f"Task {task.id}: data source {ds_id} fetch failed: {e}")
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 async def execute_task(db: AsyncSession, task: Task,
                        context: Optional[Dict[str, Any]] = None):
+    if context is None:
+        context = await build_task_context(db, task)
     if not evaluate_condition(task, context):
         logger.info(f"Task {task.id} condition not met, skipping.")
         return []

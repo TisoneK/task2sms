@@ -45,6 +45,7 @@ class TaskCreate(BaseModel):
     interval_value: Optional[int] = Field(default=None, ge=1, le=10_000_000)
     interval_unit: Optional[str] = Field(default=None, max_length=10)   # minutes | hours | days
     run_at: Optional[datetime] = None
+    data_source_id: Optional[int] = None
     condition_enabled: bool = False
     condition_field: Optional[str] = Field(default=None, max_length=100)
     condition_operator: Optional[str] = Field(default=None, max_length=20)
@@ -73,6 +74,7 @@ class TaskUpdate(BaseModel):
     interval_value: Optional[int] = Field(default=None, ge=1, le=10_000_000)
     interval_unit: Optional[str] = Field(default=None, max_length=10)
     run_at: Optional[datetime] = None
+    data_source_id: Optional[int] = None
     condition_enabled: Optional[bool] = None
     condition_field: Optional[str] = Field(default=None, max_length=100)
     condition_operator: Optional[str] = Field(default=None, max_length=20)
@@ -93,6 +95,7 @@ class TaskOut(BaseModel):
     interval_value: Optional[int]
     interval_unit: Optional[str]
     run_at: Optional[datetime]
+    data_source_id: Optional[int] = None
     condition_enabled: bool
     condition_field: Optional[str]
     condition_operator: Optional[str]

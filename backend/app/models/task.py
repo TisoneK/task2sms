@@ -34,6 +34,11 @@ class Task(Base):
     interval_unit = Column(String(20), nullable=True)       # hours/minutes/days
     run_at = Column(DateTime(timezone=True), nullable=True) # one-time
 
+    # Data source — when set, the task fetches this source before each run and
+    # uses the returned JSON object as the context its condition and message
+    # template read from (condition_field / {placeholders}).
+    data_source_id = Column(Integer, ForeignKey("data_sources.id"), nullable=True)
+
     # Condition
     condition_enabled = Column(Boolean, default=False)
     condition_field = Column(String(100), nullable=True)
