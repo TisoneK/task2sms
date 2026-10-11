@@ -52,6 +52,7 @@ is your stable session tag.
 
 | Name | Codename | Model | Doing | Status | Status detail |
 |------|----------|-------|-------|--------|---------------|
+| Dayo | S001 | claude-opus-4-8 | Upgrade this repo's ledger: pre-0.2.0 flat `.context/` → current `.context_ledger/` core 2.2.0 | Done | Migrated (two-zone + vendored core 2.2.0 + rename), facts filled, refs swept, verified; no CI added. Follow-up: wire `gates.conf` + `ledger-guard install`. First office of the new layout |
 
 **Keep your Status cells current — that is what the board is for.** The
 next live worker reads it to know at a glance what a peer has finished,
